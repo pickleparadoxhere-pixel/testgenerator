@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const iflowPickerModal = document.getElementById("iflowPickerModal");
     const iflowPickerList = document.getElementById("iflowPickerList");
     const btnSubmitTenant = document.getElementById("btnSubmitTenant");
+    const serviceKeyJson = document.getElementById("serviceKeyJson");
     const rawCurlInput = document.getElementById("rawCurlInput");
     const fileInput = document.getElementById("fileInput");
     const dropZone = document.getElementById("dropZone");
@@ -23,6 +24,42 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnClearMocks = document.getElementById("btnClearMocks");
     const btnRefreshIntercepts = document.getElementById("btnRefreshIntercepts");
     const btnExportJUnit = document.getElementById("btnExportJUnit");
+
+    // --- Service Key JSON Auto-Fill ---
+    if (serviceKeyJson) {
+        serviceKeyJson.addEventListener("input", () => {
+            const raw = serviceKeyJson.value.trim();
+            if (!raw) return;
+            try {
+                const parsed = JSON.parse(raw);
+                const extracted = extractServiceKeyFields(parsed);
+
+                if (extracted.hostUrl && document.getElementById("cpiHost")) document.getElementById("cpiHost").value = extracted.hostUrl;
+                if (extracted.clientId && document.getElementById("clientId")) document.getElementById("clientId").value = extracted.clientId;
+                if (extracted.clientSecret && document.getElementById("clientSecret")) document.getElementById("clientSecret").value = extracted.clientSecret;
+                if (extracted.tokenUrl && document.getElementById("tokenUrl")) document.getElementById("tokenUrl").value = extracted.tokenUrl;
+            } catch (e) {
+                // Ignore while user is typing incomplete JSON
+            }
+        });
+    }
+
+    function extractServiceKeyFields(keyObj) {
+        if (!keyObj || typeof keyObj !== 'object') return {};
+        
+        let src = keyObj.oauth || keyObj.credentials || keyObj.service_key || keyObj;
+        
+        let hostUrl = src.url || src.management_url || src.service_url || src.api || '';
+        if (!hostUrl && src.endpoints) {
+            hostUrl = src.endpoints.api || src.endpoints.url || src.endpoints.web || '';
+        }
+        
+        let clientId = src.clientid || src.client_id || (src.oauth ? (src.oauth.clientid || src.oauth.client_id) : '');
+        let clientSecret = src.clientsecret || src.client_secret || (src.oauth ? (src.oauth.clientsecret || src.oauth.client_secret) : '');
+        let tokenUrl = src.tokenurl || src.token_url || (src.oauth ? (src.oauth.tokenurl || src.oauth.token_url) : '');
+
+        return { hostUrl, clientId, clientSecret, tokenUrl };
+    }
 
     // --- Tab Navigation ---
     navTabs.forEach(tab => {
@@ -154,26 +191,52 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
     }
 
-    // --- Direct Postman cURL Modal Handler ---
+    // --- SAP Tenant Modal Connection Handler ---
     btnConnectTenant.addEventListener("click", () => {
         tenantModal.classList.add("active");
     });
 
     btnSubmitTenant.addEventListener("click", async () => {
+        const rawJson = serviceKeyJson ? serviceKeyJson.value.trim() : "";
         const rawCurl = rawCurlInput ? rawCurlInput.value.trim() : "";
-        if (!rawCurl) {
-            alert("Please paste your working Postman cURL command.");
-            return;
+        
+        let tenantUrl = document.getElementById("cpiHost") ? document.getElementById("cpiHost").value.trim() : "";
+        let clientId = document.getElementById("clientId") ? document.getElementById("clientId").value.trim() : "";
+        let clientSecret = document.getElementById("clientSecret") ? document.getElementById("clientSecret").value.trim() : "";
+        let tokenUrl = document.getElementById("tokenUrl") ? document.getElementById("tokenUrl").value.trim() : "";
+        let iflowName = document.getElementById("iflowName") ? document.getElementById("iflowName").value.trim() : "Horizon";
+        let version = document.getElementById("iflowVersion") ? document.getElementById("iflowVersion").value.trim() : "active";
+
+        // Auto-extract if JSON provided
+        if (rawJson) {
+            try {
+                const parsed = JSON.parse(rawJson);
+                const ext = extractServiceKeyFields(parsed);
+                if (ext.hostUrl) tenantUrl = ext.hostUrl;
+                if (ext.clientId) clientId = ext.clientId;
+                if (ext.clientSecret) clientSecret = ext.clientSecret;
+                if (ext.tokenUrl) tokenUrl = ext.tokenUrl;
+            } catch (e) {
+                // Not JSON
+            }
         }
 
-        btnSubmitTenant.innerText = "Executing Postman cURL...";
+        btnSubmitTenant.innerText = "Connecting to SAP Tenant...";
         btnSubmitTenant.disabled = true;
 
         try {
             const res = await fetch("/api/v1/cpi/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ raw_curl: rawCurl })
+                body: JSON.stringify({
+                    tenant_url: tenantUrl,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                    token_url: tokenUrl,
+                    iflow_name: iflowName,
+                    version: version,
+                    raw_curl: rawCurl
+                })
             });
             const data = await res.json();
             
@@ -181,12 +244,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 tenantModal.classList.remove("active");
                 showIFlowPickerModal(data.iflows || [], true);
             } else {
-                alert(`❌ Native Shell Output:\n\n${data.error || 'Connection failed.'}`);
+                alert(`❌ Connection Response:\n\n${data.error || 'Connection failed.'}`);
             }
         } catch (err) {
             alert("Network Error: " + err.message);
         } finally {
-            btnSubmitTenant.innerText = "Execute cURL & Fetch iFlow";
+            btnSubmitTenant.innerText = "Fetch iFlow";
             btnSubmitTenant.disabled = false;
         }
     });
@@ -352,7 +415,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    cpi_endpoint: "http://localhost:10100/mock/simulated_cpi_inbound",
+                    cpi_endpoint: "/mock/simulated_cpi_inbound",
                     test_cases: currentTestCases,
                     enable_mpl_check: true
                 })

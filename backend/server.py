@@ -46,7 +46,6 @@ def parse_and_execute_raw_curl(curl_str: str) -> tuple[dict, str]:
     if not cleaned.startswith("curl"):
         raise ValueError("Pasted string must start with 'curl'")
 
-    # Clean multi-line backslashes for shell execution
     cmd_str = cleaned.replace("\\\n", " ").replace("\n", " ")
     
     print(f"Executing shell cURL command: {cmd_str[:200]}...")
@@ -70,6 +69,24 @@ def parse_and_execute_raw_curl(curl_str: str) -> tuple[dict, str]:
         return data, stdout
     except Exception:
         return None, stdout
+
+def fetch_oauth_bearer_token(token_url: str, client_id: str, client_secret: str) -> str:
+    """Fetches OAuth 2.0 Access Bearer token from SAP BTP XSUAA token service."""
+    auth_b64 = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_b64}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("utf-8")
+    
+    req = urllib.request.Request(token_url, data=data, headers=headers, method="POST")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+        return body.get("access_token", "")
 
 class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
 
@@ -102,11 +119,10 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             zip_bytes = None
             fetch_error = None
             
-            # Fetch real iFlow zip bundle if raw cURL was provided
+            # Fetch real iFlow zip bundle if OAuth / cURL available
             if active_cpi_creds.get("raw_curl"):
                 try:
                     raw_curl = active_cpi_creds["raw_curl"]
-                    # Modify URL in raw cURL to append /$value
                     if "/$value" not in raw_curl:
                         val_curl = raw_curl.replace("')", "')/$value").replace("%27)", "%27)/$value")
                         res = subprocess.run(val_curl, shell=True, capture_output=True, timeout=25)
@@ -156,6 +172,22 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/v1/cpi/connect":
             creds = json.loads(body_bytes.decode("utf-8") or "{}")
+
+            # Unwrap BTP Service Key JSON if present
+            if "oauth" in creds and isinstance(creds["oauth"], dict):
+                oauth = creds["oauth"]
+                tenant_url = oauth.get("url") or creds.get("tenant_url")
+                client_id = oauth.get("clientid") or oauth.get("client_id") or creds.get("client_id")
+                client_secret = oauth.get("clientsecret") or oauth.get("client_secret") or creds.get("client_secret")
+                token_url = oauth.get("tokenurl") or oauth.get("token_url") or creds.get("token_url")
+            else:
+                tenant_url = creds.get("tenant_url") or creds.get("url")
+                client_id = creds.get("client_id") or creds.get("clientid")
+                client_secret = creds.get("client_secret") or creds.get("clientsecret")
+                token_url = creds.get("token_url") or creds.get("tokenurl")
+
+            iflow_name = creds.get("iflow_name") or "Horizon"
+            version = creds.get("version") or "active"
             raw_curl = creds.get("raw_curl", "").strip()
 
             if raw_curl:
@@ -164,44 +196,82 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                     res_json, raw_stdout = parse_and_execute_raw_curl(raw_curl)
                     if res_json and "d" in res_json:
                         item = res_json.get("d", {})
-                        iflow_id = item.get("Id", "Horizon")
+                        iflow_id = item.get("Id", iflow_name)
                         name = item.get("Name") or iflow_id
-                        ver = item.get("Version", "active")
+                        ver = item.get("Version", version)
                         pkg = item.get("PackageId", "DefaultPackage")
 
                         self._set_json_headers(200)
                         self.wfile.write(json.dumps({
                             "status": "LIVE_SUCCESS",
                             "message": f"Successfully executed Postman cURL! Fetched iFlow '{iflow_id}'.",
-                            "iflows": [
-                                {
-                                    "id": iflow_id,
-                                    "name": name,
-                                    "version": ver,
-                                    "package_id": pkg
-                                }
-                            ]
+                            "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
                         }).encode())
                         return
                     else:
                         self._set_json_headers(400)
                         self.wfile.write(json.dumps({
                             "status": "ERROR",
-                            "error": f"Pasted cURL Shell Output:\n\n{raw_stdout[:600]}"
+                            "error": f"cURL Response Output:\n\n{raw_stdout[:600]}"
                         }).encode())
                         return
                 except Exception as e:
                     self._set_json_headers(400)
+                    self.wfile.write(json.dumps({"status": "ERROR", "error": f"Failed cURL execution: {str(e)}"}).encode())
+                    return
+
+            # Native OAuth 2.0 Flow with BTP Service Key credentials
+            if tenant_url and client_id and client_secret:
+                tenant_clean = tenant_url.rstrip("/")
+                if not token_url:
+                    # Derivation from tenant domain if missing
+                    subdomain = tenant_clean.split("//")[-1].split(".")[0]
+                    token_url = f"https://{subdomain}.authentication.ap21.hana.ondemand.com/oauth/token"
+
+                try:
+                    bearer_token = fetch_oauth_bearer_token(token_url, client_id, client_secret)
+                    if bearer_token:
+                        active_cpi_creds["tenant_url"] = tenant_clean
+                        active_cpi_creds["bearer_token"] = bearer_token
+
+                        # Call OData designtime artifacts API
+                        odata_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_name}',Version='{version}')"
+                        curl_cmd = f"curl -s -k -H 'Authorization: Bearer {bearer_token}' -H 'Accept: application/json' '{odata_url}'"
+                        res_json, raw_out = parse_and_execute_raw_curl(curl_cmd)
+
+                        if res_json and "d" in res_json:
+                            item = res_json.get("d", {})
+                            iflow_id = item.get("Id", iflow_name)
+                            name = item.get("Name") or iflow_id
+                            ver = item.get("Version", version)
+                            pkg = item.get("PackageId", "DefaultPackage")
+
+                            self._set_json_headers(200)
+                            self.wfile.write(json.dumps({
+                                "status": "LIVE_SUCCESS",
+                                "message": f"Successfully authenticated via BTP OAuth! Fetched iFlow '{iflow_id}'.",
+                                "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
+                            }).encode())
+                            return
+                        else:
+                            self._set_json_headers(400)
+                            self.wfile.write(json.dumps({
+                                "status": "ERROR",
+                                "error": f"BTP OData API Output:\n\n{raw_out[:600]}"
+                            }).encode())
+                            return
+                except Exception as e:
+                    self._set_json_headers(400)
                     self.wfile.write(json.dumps({
                         "status": "ERROR",
-                        "error": f"Failed to execute shell cURL: {str(e)}"
+                        "error": f"OAuth token request failed: {str(e)}"
                     }).encode())
                     return
 
             self._set_json_headers(400)
             self.wfile.write(json.dumps({
                 "status": "ERROR",
-                "error": "Please paste your working Postman cURL command."
+                "error": "Please provide BTP Service Key JSON or credentials."
             }).encode())
 
         elif path == "/api/v1/testsuite/generate":
@@ -274,12 +344,12 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
 class ReusableTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
 
-def run_server(port=10100):
+def run_server(port=10000):
     server_address = ('', port)
     httpd = ReusableTCPServer(server_address, AgentHTTPRequestHandler)
     print(f"🚀 SAP CPI AI Agent Web Studio running at: http://localhost:{port}")
     httpd.serve_forever()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10100))
+    port = int(os.environ.get("PORT", 10000))
     run_server(port)

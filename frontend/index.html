@@ -62,7 +62,7 @@
                 <div class="tab-content active" id="tab-import">
                     <div class="section-header">
                         <h2>Import & Parse iFlow Package</h2>
-                        <p>Upload an exported SAP CPI iFlow bundle (.zip) or paste working Postman cURL command.</p>
+                        <p>Upload an exported SAP CPI iFlow bundle (.zip) or connect to your SAP CPI Tenant.</p>
                     </div>
 
                     <div class="grid-2col">
@@ -236,26 +236,72 @@
         </main>
     </div>
 
-    <!-- Direct Postman cURL Modal -->
+    <!-- SAP CPI Tenant Connection Modal -->
     <div class="modal-overlay" id="tenantModal">
-        <div class="modal-card" style="width: 560px;">
+        <div class="modal-card" style="width: 580px;">
             <div class="modal-header">
-                <h3>Paste Postman cURL Command</h3>
+                <h3>Connect SAP CPI Tenant</h3>
                 <button class="close-btn" onclick="document.getElementById('tenantModal').classList.remove('active')">&times;</button>
             </div>
-            <div class="modal-body">
-                <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 0.8rem; font-size: 0.82rem; margin-bottom: 1rem;">
-                    💡 Right-click your working request in Postman &rarr; <strong>Copy as cURL</strong> &rarr; Paste it below! All headers, cookies, and tokens will be preserved 100%.
+            <div class="modal-body" style="max-height: 480px; overflow-y: auto;">
+                <!-- Option A: Paste BTP Service Key JSON -->
+                <div class="card p-3 mb-3" style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3);">
+                    <h4 style="font-size: 0.9rem; color: var(--accent-purple); font-weight: 700; margin-bottom: 0.3rem;">📋 Option A: Paste BTP Service Key JSON</h4>
+                    <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.6rem;">Paste your complete BTP Service Key JSON (with <code>oauth</code> object). Fields below auto-fill instantly!</p>
+                    <textarea id="serviceKeyJson" class="code-editor" style="height: 100px; font-size: 0.75rem;" placeholder='{
+  "oauth": {
+    "clientid": "sb-...",
+    "clientsecret": "...",
+    "tokenurl": "https://.../oauth/token",
+    "url": "https://..."
+  }
+}'></textarea>
                 </div>
 
-                <div class="form-group">
-                    <label>Paste Working Postman cURL Command</label>
-                    <textarea id="rawCurlInput" class="code-editor" style="height: 140px; font-size: 0.75rem;" placeholder="curl --location 'https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/api/v1/IntegrationDesigntimeArtifacts(Id=\'Horizon\',Version=\'active\')' --user 'client_id:secret'"></textarea>
+                <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 0.8rem 0; font-weight: 600;">— OR FILL MANUAL FIELDS —</div>
+
+                <!-- Option B: Manual Input Fields -->
+                <div class="form-group mb-2">
+                    <label style="font-size: 0.8rem;">API Host URL (<code>url</code>)</label>
+                    <input type="text" id="cpiHost" placeholder="https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com">
+                </div>
+
+                <div class="grid-2col mb-2">
+                    <div class="form-group">
+                        <label style="font-size: 0.8rem;">Client ID (<code>clientid</code>)</label>
+                        <input type="text" id="clientId" placeholder="sb-733df346-...">
+                    </div>
+                    <div class="form-group">
+                        <label style="font-size: 0.8rem;">Client Secret (<code>clientsecret</code>)</label>
+                        <input type="password" id="clientSecret" placeholder="••••••••••••">
+                    </div>
+                </div>
+
+                <div class="form-group mb-2">
+                    <label style="font-size: 0.8rem;">OAuth Token URL (<code>tokenurl</code>)</label>
+                    <input type="text" id="tokenUrl" placeholder="https://cpi-gtxsss73.authentication.ap21.hana.ondemand.com/oauth/token">
+                </div>
+
+                <div class="grid-2col mb-2">
+                    <div class="form-group">
+                        <label style="font-size: 0.8rem;">iFlow Name / ID</label>
+                        <input type="text" id="iflowName" value="Horizon" placeholder="Horizon">
+                    </div>
+                    <div class="form-group">
+                        <label style="font-size: 0.8rem;">Version</label>
+                        <input type="text" id="iflowVersion" value="active" placeholder="active">
+                    </div>
+                </div>
+
+                <!-- Option C: Paste Postman cURL -->
+                <div class="form-group mt-3">
+                    <label style="font-size: 0.8rem;">Option C: Paste Postman cURL (Optional)</label>
+                    <textarea id="rawCurlInput" class="code-editor" style="height: 60px; font-size: 0.72rem;" placeholder="curl --location 'https://...' --user 'client_id:secret'"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="document.getElementById('tenantModal').classList.remove('active')">Cancel</button>
-                <button class="btn btn-primary" id="btnSubmitTenant">Execute cURL & Fetch iFlow</button>
+                <button class="btn btn-primary" id="btnSubmitTenant">Fetch iFlow</button>
             </div>
         </div>
     </div>
