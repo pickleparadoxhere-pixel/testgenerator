@@ -196,7 +196,6 @@ async def fetch_cpi_iflow_metadata(iflow_id: str):
 
     if tenant_url and token:
         try:
-            full_discovered_url = await discover_cpi_full_endpoint(tenant_url, token, iflow_id)
             async with httpx.AsyncClient(verify=False, timeout=20.0) as client:
                 headers = {"Authorization": f"Bearer {token}"}
                 val_url = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='{version}')/$value"
@@ -205,6 +204,11 @@ async def fetch_cpi_iflow_metadata(iflow_id: str):
                     zip_bytes = resp.content
         except Exception as e:
             fetch_error = str(e)
+
+        try:
+            full_discovered_url = await discover_cpi_full_endpoint(tenant_url, token, iflow_id)
+        except Exception:
+            pass
 
     if not zip_bytes or len(zip_bytes) < 100:
         zip_bytes = create_sample_iflow_zip()

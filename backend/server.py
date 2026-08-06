@@ -147,15 +147,30 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             if metadata.name == iflow_id or not metadata.name:
                 metadata.name = iflow_id.replace("_", " ").title()
 
-            if tenant_url and token:
+            if active_cpi_creds.get("tenant_url") and active_cpi_creds.get("bearer_token"):
                 try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    full_discovered_url = loop.run_until_complete(discover_cpi_full_endpoint(tenant_url, token, iflow_id))
-                    if full_discovered_url:
-                        metadata.inbound_endpoint.url_path = full_discovered_url
-                except Exception:
-                    pass
+                    tenant_clean = active_cpi_creds["tenant_url"].rstrip("/")
+                    token = active_cpi_creds["bearer_token"]
+                    ep_url = f"{tenant_clean}/api/v1/ServiceEndpoints"
+                    req_ep = urllib.request.Request(ep_url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+                    ctx = ssl._create_unverified_context()
+                    with urllib.request.urlopen(req_ep, context=ctx, timeout=5) as resp_ep:
+                        if resp_ep.status == 200:
+                            ep_data = json.loads(resp_ep.read().decode())
+                            results = ep_data.get("d", {}).get("results", [])
+                            for item in results:
+                                item_name = item.get("Name") or ""
+                                item_id = item.get("Id") or ""
+                                if iflow_id.lower() == item_name.lower() or iflow_id.lower() in item_id.lower():
+                                    ep_addr = item_id.split("endpointAddress=")[-1] if "endpointAddress=" in item_id else item_name.lower()
+                                    if not ep_addr.startswith("/"):
+                                        ep_addr = "/" + ep_addr
+                                    if not ep_addr.startswith("/http/") and not ep_addr.startswith("/cxf/"):
+                                        ep_addr = "/http" + ep_addr
+                                    metadata.inbound_endpoint.url_path = f"{tenant_clean}{ep_addr}"
+                                    break
+                except Exception as ex_ep:
+                    print(f"ServiceEndpoints discovery note: {ex_ep}")
 
             if fetch_error:
                 metadata.description = f"Notice: Live ZIP download note ({fetch_error}). Displaying parsed structure."
