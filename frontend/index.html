@@ -6,7 +6,7 @@
     <title>SAP CPI AI Test & Mock Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
                 <div class="logo-icon">⚡</div>
                 <div class="logo-text">
                     <h1>SAP CPI <span>AI Studio</span></h1>
-                    <p class="subtitle">Automated iFlow Test Generator & Mocking Agent</p>
+                    <p class="subtitle">Automated iFlow Test Generator & Receiver Mock Agent</p>
                 </div>
             </div>
             
@@ -29,7 +29,7 @@
                     <span>📦</span> Load Sample iFlow
                 </button>
                 <button class="btn btn-primary" id="btnConnectTenant">
-                    <span>🔑</span> Connect Management Tenant (api)
+                    <span>🔑</span> Connect CPI Tenant (api)
                 </button>
             </div>
         </header>
@@ -69,8 +69,8 @@
                         <!-- File Upload Card -->
                         <div class="card drop-zone" id="dropZone">
                             <div class="drop-zone-icon">☁️</div>
-                            <h3>Drag & Drop iFlow ZIP Archive</h3>
-                            <p>Upload your SAP CPI iFlow <code>.zip</code> package bundle</p>
+                            <h3 style="font-size: 1rem; color: #fff; font-weight: 600;">Drag & Drop iFlow ZIP Archive</h3>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Upload your SAP CPI iFlow <code>.zip</code> package bundle</p>
                             <input type="file" id="fileInput" accept=".zip" hidden>
                             <button class="btn btn-primary mt-3" onclick="document.getElementById('fileInput').click()">Browse Files</button>
                         </div>
@@ -81,7 +81,7 @@
                                 <h3>Parsed iFlow Metadata</h3>
                                 <span class="badge" id="iflowStatusBadge">No iFlow Loaded</span>
                             </div>
-                            <div class="metadata-body" id="metadataBody">
+                            <div class="card-body" id="metadataBody">
                                 <div class="empty-state">
                                     <div class="empty-icon">🔍</div>
                                     <p>Upload an iFlow ZIP file or load the sample package to get started.</p>
@@ -151,7 +151,7 @@
                                 <h3>Registered Mock Routes</h3>
                             </div>
                             <div class="card-body" id="mockRoutesList">
-                                <p class="text-muted">No mock rules active. Generate test cases to configure automatic receiver rules.</p>
+                                <p class="text-muted" style="font-size: 0.82rem;">No mock rules active. Generate test cases to configure automatic receiver rules.</p>
                             </div>
                         </div>
 
@@ -182,95 +182,98 @@
                         </button>
                     </div>
 
-                    <!-- Runtime Service Key (it-rt) Box -->
-                    <div class="card p-3 mb-4" style="background: rgba(139, 92, 246, 0.14); border: 2px solid var(--accent-purple); box-shadow: 0 4px 25px rgba(139, 92, 246, 0.25);">
-                        <div class="flex-between mb-2">
-                            <h4 style="font-size: 1rem; color: #fff; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
-                                <span>🔑</span> Integration Flow Runtime (it-rt) Service Key
-                            </h4>
-                            <div style="display: flex; gap: 0.8rem; align-items: center;">
-                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(239, 68, 68, 0.6); padding: 0.35rem 0.75rem; border-radius: 6px;">
-                                    <input type="radio" name="execMode" value="live" id="execModeLive" checked> 🔴 Live SAP CPI Endpoint
-                                </label>
-                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(16, 185, 129, 0.25); border: 1px solid rgba(16, 185, 129, 0.6); padding: 0.35rem 0.75rem; border-radius: 6px;">
-                                    <input type="radio" name="execMode" value="simulation" id="execModeSim"> 🟢 Offline Simulation
-                                </label>
-                            </div>
+                    <!-- Runtime Inbound Credentials Box (it-rt) -->
+                    <div class="card mb-4" style="border-color: rgba(99, 102, 241, 0.35); background: rgba(99, 102, 241, 0.04);">
+                        <div class="card-header flex-between" style="background: rgba(99, 102, 241, 0.08);">
+                            <h3 style="color: #fff; font-size: 0.88rem; display: flex; align-items: center; gap: 0.4rem;">
+                                <span>🔑</span> Runtime Inbound Credentials (it-rt Service Key JSON)
+                            </h3>
+                            <span class="badge" style="color: #818cf8; background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.3);">Required for Live CPI Execution</span>
                         </div>
-
-                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.8rem;">Paste your <code>it-rt</code> Service Key JSON below. It auto-fills the complete runtime endpoint URL and authorizes HTTP POST requests with <code>ESBMessaging.send</code>!</p>
-                        
-                        <div class="form-group mb-3">
-                            <textarea id="itRtServiceKeyJson" class="code-editor" style="height: 100px; font-size: 0.78rem; border-color: var(--accent-purple);" placeholder='{
-    "oauth": {
-        "clientid": "sb-f74e9b18-7780-4b47-9b7d-43cf2fc6c548!b135881|it-rt-cpi-gtxsss73!b196",
-        "clientsecret": "8f326dd1-230c-4e5c-920b-edbcfe4e596a$BpcnZRkGL09HhzrRqwzMNLWunX4ENB8N7oC092_EcFY=",
-        "url": "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com",
-        "createdate": "2026-08-02T18:21:06.154Z",
-        "tokenurl": "https://cpi-gtxsss73.authentication.ap21.hana.ondemand.com/oauth/token"
-    }
+                        <div class="card-body" style="padding: 1rem;">
+                            <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.6rem;">Paste your <code>it-rt</code> Runtime Service Key JSON (with <code>ESBMessaging.send</code> scope). The tool extracts client ID, secret, token URL, and runtime host automatically.</p>
+                            <textarea id="itRtServiceKeyJson" class="code-editor" style="height: 90px; font-size: 0.78rem; border-color: rgba(99, 102, 241, 0.25);" placeholder='{
+  "oauth": {
+    "clientid": "sb-f74e9b18...!it-rt-...",
+    "clientsecret": "8f326dd1...",
+    "tokenurl": "https://...authentication.ap21.hana.ondemand.com/oauth/token",
+    "url": "https://...it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com"
+  }
 }'></textarea>
                         </div>
+                    </div>
 
-                        <div class="form-group mb-2">
-                            <label style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Discovered Complete Target Endpoint URL:</label>
-                            <input type="text" id="targetCpiEndpoint" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-cyan); background: #0d1117; border: 1px solid var(--border-color); padding: 0.6rem;" placeholder="https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon">
-                        </div>
-
-                        <div class="form-group mb-1 mt-2">
-                            <label style="font-size: 0.8rem; color: var(--text-muted);">Auth Header Method:</label>
-                            <select id="runtimeAuthType" style="background: #0d1117; color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.6rem; font-size: 0.8rem; border-radius: 4px;">
-                                <option value="oauth2">OAuth 2.0 Client Credentials (tokenurl)</option>
-                                <option value="basic">Basic Authentication (clientid:clientsecret)</option>
-                                <option value="default">Use Management Session Token</option>
-                            </select>
+                    <!-- Config Toolbar -->
+                    <div class="card mb-4">
+                        <div class="card-body flex-between" style="padding: 0.85rem 1.25rem;">
+                            <div class="form-group flex-between" style="flex-direction: row; gap: 1.5rem; align-items: center; width: 100%;">
+                                <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1;">
+                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; white-space: nowrap;">Target Endpoint:</label>
+                                    <input type="text" id="targetCpiEndpoint" value="https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon" style="flex: 1;">
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; white-space: nowrap;">Auth Mode:</label>
+                                    <select id="runtimeAuthType" style="padding: 0.4rem 0.6rem; background: var(--bg-inset); color: #fff; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.8rem;">
+                                        <option value="oauth2">OAuth 2.0 Client Credentials (it-rt)</option>
+                                        <option value="basic">Basic Auth (clientid:clientsecret)</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 1rem;">
+                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
+                                        <input type="radio" name="execMode" value="live" id="execModeLive" checked> 🔴 Live CPI Endpoint
+                                    </label>
+                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
+                                        <input type="radio" name="execMode" value="simulation" id="execModeSim"> 🟢 Offline Simulation
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     <!-- Summary Stats Bar -->
-                    <div class="stats-grid">
+                    <div class="stats-grid mb-4">
                         <div class="stat-card">
-                            <span class="stat-value" id="statTotal">0</span>
-                            <span class="stat-label">Total Executed</span>
+                            <div class="stat-value" id="statTotal">0</div>
+                            <div class="stat-label">Total Executed</div>
                         </div>
                         <div class="stat-card stat-pass">
-                            <span class="stat-value" id="statPassed">0</span>
-                            <span class="stat-label">Passed</span>
+                            <div class="stat-value" id="statPassed">0</div>
+                            <div class="stat-label">Passed</div>
                         </div>
                         <div class="stat-card stat-fail">
-                            <span class="stat-value" id="statFailed">0</span>
-                            <span class="stat-label">Failed</span>
+                            <div class="stat-value" id="statFailed">0</div>
+                            <div class="stat-label">Failed</div>
                         </div>
                         <div class="stat-card">
-                            <span class="stat-value" id="statDuration">0 ms</span>
-                            <span class="stat-label">Total Duration</span>
+                            <div class="stat-value" id="statDuration">0 ms</div>
+                            <div class="stat-label">Total Duration</div>
                         </div>
                     </div>
 
-                    <!-- Execution Results Table -->
-                    <div class="card mt-4">
+                    <!-- Results Table -->
+                    <div class="card">
                         <div class="card-header flex-between">
-                            <h3>Test Execution Results</h3>
-                            <button class="btn btn-sm btn-secondary" id="btnExportJUnit" style="display:none;">
-                                📄 Export JUnit XML
+                            <h3>Test Suite Execution Results</h3>
+                            <button class="btn btn-sm btn-secondary" id="btnExportJUnit" style="display: none;">
+                                <span>📄</span> Export JUnit XML
                             </button>
                         </div>
-                        <div class="card-body p-0">
-                            <table class="data-table" id="resultsTable">
+                        <div class="card-body" style="padding: 0;">
+                            <table class="data-table">
                                 <thead>
                                     <tr>
                                         <th>Status</th>
-                                        <th>ID</th>
+                                        <th>Test ID</th>
                                         <th>Scenario Name</th>
                                         <th>Category</th>
-                                        <th>Duration</th>
-                                        <th>CPI MPL ID</th>
-                                        <th>Details</th>
+                                        <th>Latency</th>
+                                        <th>SAP MPL ID</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="resultsTableBody">
                                     <tr>
-                                        <td colspan="7" class="text-center p-4 text-muted">No execution runs recorded yet. Click "Execute Full Test Suite".</td>
+                                        <td colspan="7" class="empty-state">No test suite runs executed yet. Click "Execute Full Test Suite" to start.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -283,21 +286,20 @@
 
     <!-- SAP CPI Tenant Connection Modal -->
     <div class="modal-overlay" id="tenantModal">
-        <div class="modal-card" style="width: 620px; max-width: 95vw;">
+        <div class="modal-card" style="width: 600px; max-width: 95vw;">
             <div class="modal-header">
-                <h3>Connect SAP CPI Management Tenant (api)</h3>
+                <h3>Connect SAP CPI Tenant (Management api Key)</h3>
                 <button class="close-btn" onclick="document.getElementById('tenantModal').classList.remove('active')">&times;</button>
             </div>
-            <div class="modal-body" style="max-height: 80vh; overflow-y: auto; padding: 1.5rem;">
+            <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
                 <!-- Option A: Paste BTP Service Key JSON -->
-                <div class="card p-3 mb-3" style="background: rgba(139, 92, 246, 0.12); border: 2px solid var(--accent-purple); box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);">
-                    <h4 style="font-size: 0.95rem; color: #fff; font-weight: 700; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.4rem;">
+                <div class="card" style="background: rgba(99, 102, 241, 0.06); border-color: rgba(99, 102, 241, 0.3); padding: 1.1rem;">
+                    <h4 style="font-size: 0.88rem; color: #fff; font-weight: 600; margin-bottom: 0.3rem; display: flex; align-items: center; gap: 0.4rem;">
                         <span>📋</span> Option A: Paste BTP Management Service Key JSON (api)
                     </h4>
-                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.8rem;">Paste your BTP Management Service Key JSON (with <code>oauth</code> object) to list and download iFlows.</p>
-                    <textarea id="serviceKeyJson" class="code-editor" style="height: 120px; font-size: 0.78rem; border-color: var(--accent-purple);" placeholder='{
+                    <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.65rem;">Paste your BTP Management Service Key JSON to list and download iFlows from your tenant.</p>
+                    <textarea id="serviceKeyJson" class="code-editor" style="height: 110px; font-size: 0.78rem; border-color: rgba(99, 102, 241, 0.25);" placeholder='{
   "oauth": {
-    "createdate": "2026-08-02T18:20:18.318Z",
     "clientid": "sb-...",
     "clientsecret": "...",
     "tokenurl": "https://.../oauth/token",
@@ -306,37 +308,37 @@
 }'></textarea>
                 </div>
 
-                <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 1rem 0; font-weight: 600;">— OR FILL MANUAL FIELDS BELOW —</div>
+                <div style="text-align: center; color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.4rem 0;">— Or Enter Manual Credentials —</div>
 
                 <!-- Option B: Manual Input Fields -->
-                <div class="form-group mb-2">
-                    <label style="font-size: 0.8rem;">API Host URL (<code>url</code>)</label>
+                <div class="form-group">
+                    <label>API Host URL (<code>url</code>)</label>
                     <input type="text" id="cpiHost" placeholder="https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com">
                 </div>
 
-                <div class="grid-2col mb-2">
+                <div class="grid-2col">
                     <div class="form-group">
-                        <label style="font-size: 0.8rem;">Client ID (<code>clientid</code>)</label>
+                        <label>Client ID (<code>clientid</code>)</label>
                         <input type="text" id="clientId" placeholder="sb-733df346-...">
                     </div>
                     <div class="form-group">
-                        <label style="font-size: 0.8rem;">Client Secret (<code>clientsecret</code>)</label>
+                        <label>Client Secret (<code>clientsecret</code>)</label>
                         <input type="password" id="clientSecret" placeholder="••••••••••••">
                     </div>
                 </div>
 
-                <div class="form-group mb-2">
-                    <label style="font-size: 0.8rem;">OAuth Token URL (<code>tokenurl</code>)</label>
+                <div class="form-group">
+                    <label>OAuth Token URL (<code>tokenurl</code>)</label>
                     <input type="text" id="tokenUrl" placeholder="https://cpi-gtxsss73.authentication.ap21.hana.ondemand.com/oauth/token">
                 </div>
 
-                <div class="grid-2col mb-2">
+                <div class="grid-2col">
                     <div class="form-group">
-                        <label style="font-size: 0.8rem;">iFlow Name / ID</label>
+                        <label>iFlow Name / ID</label>
                         <input type="text" id="iflowName" value="Horizon" placeholder="Horizon">
                     </div>
                     <div class="form-group">
-                        <label style="font-size: 0.8rem;">Version</label>
+                        <label>Version</label>
                         <input type="text" id="iflowVersion" value="active" placeholder="active">
                     </div>
                 </div>
@@ -350,12 +352,12 @@
 
     <!-- iFlow Selector Modal -->
     <div class="modal-overlay" id="iflowPickerModal">
-        <div class="modal-card" style="width: 580px;">
+        <div class="modal-card" style="width: 560px;">
             <div class="modal-header">
-                <h3>Select an iFlow to Test</h3>
+                <h3>Select iFlow from Tenant</h3>
                 <button class="close-btn" onclick="document.getElementById('iflowPickerModal').classList.remove('active')">&times;</button>
             </div>
-            <div class="modal-body" style="max-height: 400px; overflow-y: auto;" id="iflowPickerList">
+            <div class="modal-body" style="max-height: 380px; overflow-y: auto;" id="iflowPickerList">
                 <!-- Dynamically populated iFlow list -->
             </div>
             <div class="modal-footer">
