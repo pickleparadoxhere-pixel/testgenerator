@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import re
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -32,7 +34,7 @@ class AITestGenerator:
             except Exception as e:
                 logger.error(f"Gemini API error, falling back to rule-based engine: {e}", exc_info=True)
 
-        # Fallback to intelligent rule-based synthesis
+        # Fallback to intelligent rule-based synthesis tailored to iFlow metadata
         logger.info("Using intelligent rule-based engine for test synthesis.")
         return self._generate_rule_based_test_cases(metadata, request.num_cases_per_category)
 
@@ -44,7 +46,7 @@ class AITestGenerator:
         
         prompt = f"""
 You are an expert SAP Integration Suite (CPI) QA Automation Engineer.
-Generate a comprehensive automated test suite for the following iFlow:
+Generate a comprehensive automated test suite tailored SPECIFICALLY to the following iFlow:
 
 iFlow Name: {metadata.name} (ID: {metadata.id})
 Inbound Endpoint: {metadata.inbound_endpoint.name} ({metadata.inbound_endpoint.adapter_type} at {metadata.inbound_endpoint.url_path})
@@ -53,8 +55,12 @@ Receiver Systems to Mock: {receivers_summary}
 Detected Groovy Scripts: {scripts_summary}
 Detected XSLT / Mappings: {mappings_summary}
 
-Extracted Schemas / WSDLs / Mappings / Context:
-{metadata.inbound_endpoint.raw_schema or 'No schema attached. Construct realistic enterprise SAP business payload fields for this iFlow name.'}
+Extracted iFlow Code, BPMN XML, Groovy Scripts, Schemas & Context:
+{metadata.inbound_endpoint.raw_schema or 'No schema attached.'}
+
+CRITICAL MANDATE:
+Analyze the attached iFlow BPMN XML, Groovy scripts, mappings, and iFlow name ({metadata.name}) to construct exact root XML tags, JSON keys, data types, and business fields required by THIS iFlow.
+Do NOT output generic "OrderHeader" or "SalesOrg" fields unless they are explicitly present in the iFlow definition!
 
 INSTRUCTIONS:
 Generate exactly:
@@ -66,10 +72,10 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
 [
   {{
     "id": "TC-001",
-    "name": "Happy Path - Valid Business Scenario",
+    "name": "Happy Path - Valid Scenario for {metadata.name}",
     "category": "happy_path",
-    "description": "Tests successful processing with valid payload fields",
-    "payload": "<Root><Field>Value</Field></Root>",
+    "description": "Tests successful processing with valid payload fields for {metadata.name}",
+    "payload": "<{metadata.id}Request>...</{metadata.id}Request>",
     "payload_type": "{metadata.inbound_endpoint.payload_format}",
     "expected_status": 200,
     "assertions": [
@@ -81,7 +87,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
         "match_condition": null,
         "response_status": 200,
         "response_headers": {{"Content-Type": "application/json"}},
-        "response_body": "{{\\"status\\": \\"SUCCESS\\", \\"message\\": \\"Mock response\\"}}"
+        "response_body": "{{\\"status\\": \\"SUCCESS\\", \\"iflow\\": \\"{metadata.id}\\"}}"
       }}
     ]
   }}
@@ -119,94 +125,74 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
     def _generate_rule_based_test_cases(self, metadata: IFlowMetadata, cases_per_cat: int) -> List[TestCase]:
         format_type = metadata.inbound_endpoint.payload_format.upper()
         main_receiver = metadata.receiver_endpoints[0].name if metadata.receiver_endpoints else "Backend_System"
+        iflow_tag = re.sub(r'[^a-zA-Z0-9]', '', metadata.id or metadata.name) or "IntegrationData"
+
+        # Inspect raw_schema for custom keys / tags
+        raw_schema = metadata.inbound_endpoint.raw_schema or ""
+        discovered_keys = re.findall(r'\"([a-zA-Z0-9_]+)\"\s*:', raw_schema)
+        discovered_tags = re.findall(r'<([a-zA-Z0-9_]+)>', raw_schema)
+        
+        filtered_tags = [t for t in discovered_tags if t not in ["property", "key", "value", "bpmn2", "ifl", "definitions", "collaboration", "participant", "extensionElements"]]
 
         cases: List[TestCase] = []
 
         if format_type == "XML":
-            happy_payload = f"""<{metadata.id or 'OrderRequest'}>
-    <Header>
-        <SalesOrg>1010</SalesOrg>
-        <DistributionChannel>10</DistributionChannel>
-        <CustomerNumber>000100456</CustomerNumber>
-        <OrderType>OR</OrderType>
-    </Header>
-    <Items>
-        <Item>
-            <ItemNumber>10</ItemNumber>
-            <MaterialNumber>MAT-A100</MaterialNumber>
-            <Quantity>10</Quantity>
-            <Price>150.00</Price>
-        </Item>
-    </Items>
-</{metadata.id or 'OrderRequest'}>"""
+            root_tag = filtered_tags[0] if filtered_tags else f"{iflow_tag}Request"
+            sub_tag = filtered_tags[1] if len(filtered_tags) > 1 else "Header"
+            field_tag = filtered_tags[2] if len(filtered_tags) > 2 else "TransactionID"
 
-            boundary_payload = f"""<{metadata.id or 'OrderRequest'}>
-    <Header>
-        <SalesOrg>1010</SalesOrg>
-        <CustomerNumber>CUST-ÖÄÜ-&amp;-SPECIAL-#12345</CustomerNumber>
-        <OrderType>OR</OrderType>
-        <Notes>Long text line with 500 characters repeating AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</Notes>
-    </Header>
-    <Items>
-        <Item>
-            <ItemNumber>999</ItemNumber>
-            <MaterialNumber>MAT-MAX</MaterialNumber>
-            <Quantity>999999</Quantity>
-        </Item>
-    </Items>
-</{metadata.id or 'OrderRequest'}>"""
+            happy_payload = f"""<{root_tag}>
+    <{sub_tag}>
+        <{field_tag}>TRX-100456</{field_tag}>
+        <SourceSystem>SAP_CPI_{iflow_tag}</SourceSystem>
+        <Timestamp>{time.strftime('%Y-%m-%dT%H:%M:%SZ')}</Timestamp>
+    </{sub_tag}>
+</{root_tag}>"""
 
-            negative_payload = f"""<{metadata.id or 'OrderRequest'}>
-    <Header>
-        <!-- Mandatory CustomerNumber omitted -->
-        <OrderType>INVALID_TYPE</OrderType>
-    </Header>
-</{metadata.id or 'OrderRequest'}>"""
+            boundary_payload = f"""<{root_tag}>
+    <{sub_tag}>
+        <{field_tag}>TRX-ÖÄÜ-&amp;-SPECIAL-#999</{field_tag}>
+        <SourceSystem>SAP_CPI_MAX_LIMIT_TEST</SourceSystem>
+        <Notes>Long repeating text string AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</Notes>
+    </{sub_tag}>
+</{root_tag}>"""
+
+            negative_payload = f"""<{root_tag}>
+    <{sub_tag}>
+        <!-- Mandatory {field_tag} field omitted to test iFlow exception handling -->
+        <SourceSystem>INVALID</SourceSystem>
+    </{sub_tag}>
+</{root_tag}>"""
 
         else:
+            key1 = discovered_keys[0] if discovered_keys else "transactionId"
+            key2 = discovered_keys[1] if len(discovered_keys) > 1 else "sourceSystem"
+
             happy_payload = json.dumps({
-                "Header": {
-                    "SalesOrg": "1010",
-                    "DistributionChannel": "10",
-                    "CustomerNumber": "000100456",
-                    "OrderType": "OR"
-                },
-                "Items": [
-                    {
-                        "ItemNumber": "10",
-                        "MaterialNumber": "MAT-A100",
-                        "Quantity": 10,
-                        "Price": 150.00
-                    }
-                ]
+                iflow_tag: {
+                    key1: "TRX-100456",
+                    key2: f"SAP_CPI_{iflow_tag}",
+                    "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                }
             }, indent=2)
 
             boundary_payload = json.dumps({
-                "Header": {
-                    "SalesOrg": "1010",
-                    "CustomerNumber": "CUST-ÖÄÜ-&-SPECIAL-#12345",
-                    "OrderType": "OR",
-                    "Notes": "A" * 300
-                },
-                "Items": [
-                    {
-                        "ItemNumber": "999",
-                        "MaterialNumber": "MAT-MAX",
-                        "Quantity": 999999,
-                        "Price": 0.00
-                    }
-                ]
+                iflow_tag: {
+                    key1: "TRX-ÖÄÜ-&-SPECIAL-#999",
+                    key2: "SAP_CPI_MAX_LIMIT_TEST",
+                    "notes": "A" * 300
+                }
             }, indent=2)
 
             negative_payload = json.dumps({
-                "Header": {
-                    "OrderType": "INVALID"
+                iflow_tag: {
+                    key2: "INVALID"
                 }
             }, indent=2)
 
         cases.append(TestCase(
             id="TC-001",
-            name="Happy Path - Valid Business Transaction",
+            name=f"Happy Path - Valid Scenario for {metadata.name}",
             category="happy_path",
             description=f"Validates standard processing flow for {metadata.name} when all required fields and business values are correct.",
             payload=happy_payload,
@@ -220,16 +206,16 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
                 MockResponseRule(
                     receiver_name=main_receiver,
                     response_status=200,
-                    response_body=json.dumps({"status": "SUCCESS", "referenceId": "REF-100456", "message": "Processed successfully"})
+                    response_body=json.dumps({"status": "SUCCESS", "iFlow": metadata.id, "message": "Processed successfully"})
                 )
             ]
         ))
 
         cases.append(TestCase(
             id="TC-002",
-            name="Boundary - Special Characters & Max Limits",
+            name=f"Boundary - Special Characters & Limits for {metadata.name}",
             category="boundary",
-            description="Verifies schema resilience against unicode characters, high volume item counts, and boundary values.",
+            description=f"Verifies {metadata.name} resilience against unicode characters, high volume data, and boundary values.",
             payload=boundary_payload,
             payload_type=format_type,
             expected_status=200,
@@ -240,16 +226,16 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
                 MockResponseRule(
                     receiver_name=main_receiver,
                     response_status=200,
-                    response_body=json.dumps({"status": "SUCCESS", "referenceId": "REF-MAX", "warnings": ["High quantity item"]})
+                    response_body=json.dumps({"status": "SUCCESS", "warnings": ["High length field"]})
                 )
             ]
         ))
 
         cases.append(TestCase(
             id="TC-003",
-            name="Negative - Missing Mandatory Fields",
+            name=f"Negative - Missing Mandatory Fields for {metadata.name}",
             category="negative",
-            description="Ensures iFlow exception subprocess handles missing fields and returns HTTP 400 Bad Request error.",
+            description=f"Ensures {metadata.name} exception subprocess handles missing fields and returns HTTP 400 Bad Request error.",
             payload=negative_payload,
             payload_type=format_type,
             expected_status=400,
@@ -260,7 +246,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
                 MockResponseRule(
                     receiver_name=main_receiver,
                     response_status=400,
-                    response_body=json.dumps({"error": "BAD_REQUEST", "message": "CustomerNumber is required"})
+                    response_body=json.dumps({"error": "BAD_REQUEST", "message": "Required field missing"})
                 )
             ]
         ))

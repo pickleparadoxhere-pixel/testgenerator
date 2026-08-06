@@ -16,7 +16,6 @@ class IFlowParser:
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
                 file_list = z.namelist()
                 
-                # Detect component.xml or bpmn or iflw files
                 component_xml_path = None
                 for path in file_list:
                     if path.endswith("component.xml") or path.endswith(".bpmn") or path.endswith(".iflw"):
@@ -26,31 +25,50 @@ class IFlowParser:
                 groovy_scripts = [p for p in file_list if p.endswith(".groovy")]
                 xslt_mappings = [p for p in file_list if p.endswith(".xsl") or p.endswith(".xslt")]
                 schema_files = [p for p in file_list if p.endswith(".xsd") or p.endswith(".wsdl") or p.endswith(".edmx") or p.endswith(".json") or p.endswith(".mmap") or p.endswith(".xsl") or p.endswith(".xslt")]
+                prop_files = [p for p in file_list if p.endswith(".prop") or p.endswith(".propdef")]
 
-                # Default fallback values
                 iflow_id = filename.replace(".zip", "")
                 iflow_name = iflow_id.replace("_", " ").title()
                 
-                inbound_path = f"/cxf/http/{iflow_id.lower()}"
+                inbound_path = f"/http/{iflow_id.lower()}"
                 inbound_adapter = "HTTPS"
                 payload_format = "JSON"
                 receiver_endpoints: List[ReceiverEndpoint] = []
                 raw_schema_content = ""
 
-                # Extract schema file content if present
+                # 1. Extract Schema and Mapping files
                 for sf in schema_files:
                     try:
                         content = z.read(sf).decode("utf-8", errors="ignore")
-                        raw_schema_content += f"\n--- File: {sf} ---\n" + content[:1500]
+                        raw_schema_content += f"\n--- Schema/Mapping File: {sf} ---\n" + content[:2500]
                         if sf.endswith(".json"):
                             payload_format = "JSON"
-                        elif sf.endswith(".xsd") or sf.endswith(".wsdl"):
+                        elif sf.endswith(".xsd") or sf.endswith(".wsdl") or sf.endswith(".mmap"):
                             payload_format = "XML"
                     except Exception:
                         pass
 
+                # 2. Extract Groovy Scripts (to capture payload field references)
+                for gs in groovy_scripts:
+                    try:
+                        content = z.read(gs).decode("utf-8", errors="ignore")
+                        raw_schema_content += f"\n--- Groovy Script: {gs} ---\n" + content[:2000]
+                    except Exception:
+                        pass
+
+                # 3. Extract Parameter Property files
+                for pf in prop_files:
+                    try:
+                        content = z.read(pf).decode("utf-8", errors="ignore")
+                        raw_schema_content += f"\n--- Property File: {pf} ---\n" + content[:1000]
+                    except Exception:
+                        pass
+
+                # 4. Extract BPMN .iflw Flow Definition XML
                 if component_xml_path:
                     xml_content = z.read(component_xml_path).decode("utf-8", errors="ignore")
+                    raw_schema_content += f"\n--- iFlow BPMN Definition ({component_xml_path}) ---\n" + xml_content[:3000]
+                    
                     parsed_component = self._parse_xml_tree(xml_content)
                     
                     if parsed_component.get("inbound_path"):
@@ -106,8 +124,6 @@ class IFlowParser:
         result = {"inbound_path": None, "inbound_adapter": "HTTPS", "receivers": []}
         try:
             root = ET.fromstring(xml_content)
-            
-            # 1. Parse SAP CPI property elements (<ifl:property><key>...</key><value>...</value></ifl:property>)
             props = {}
             for elem in root.iter():
                 tag = elem.tag.split("}")[-1]
@@ -148,7 +164,6 @@ class IFlowParser:
             elif "TransportProtocol" in props and props["TransportProtocol"]:
                 result["inbound_adapter"] = props["TransportProtocol"]
 
-            # Fallback scan if property elements not found
             if not result["inbound_path"]:
                 for elem in root.iter():
                     val = elem.attrib.get("value") or elem.attrib.get("address") or elem.text
@@ -170,7 +185,7 @@ class IFlowParser:
             inbound_endpoint=InboundEndpoint(
                 name="HTTPS_Sender",
                 adapter_type="HTTPS",
-                url_path=f"/cxf/sap/{filename.replace('.zip', '').lower()}",
+                url_path=f"/http/{filename.replace('.zip', '').lower()}",
                 method="POST",
                 payload_format="JSON"
             ),
