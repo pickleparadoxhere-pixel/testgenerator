@@ -182,23 +182,23 @@
                         </button>
                     </div>
 
-                    <!-- Target CPI Endpoint Configuration Box -->
-                    <div class="card p-3 mb-4" style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3);">
+                    <!-- Prominent Target CPI Endpoint Box -->
+                    <div class="card p-3 mb-4" style="background: rgba(139, 92, 246, 0.12); border: 2px solid var(--accent-purple); box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);">
                         <div class="flex-between mb-2">
-                            <h4 style="font-size: 0.95rem; color: #fff; font-weight: 700;">🎯 Target CPI Endpoint Configuration</h4>
-                            <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
+                            <h4 style="font-size: 1rem; color: #fff; font-weight: 700;">🎯 Target CPI Endpoint Configuration</h4>
+                            <div style="display: flex; gap: 0.8rem; align-items: center;">
+                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); padding: 0.3rem 0.7rem; border-radius: 6px;">
                                     <input type="radio" name="execMode" value="live" id="execModeLive" checked> 🔴 Live SAP CPI Endpoint
                                 </label>
-                                <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer; margin-left: 0.8rem;">
+                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); padding: 0.3rem 0.7rem; border-radius: 6px;">
                                     <input type="radio" name="execMode" value="simulation" id="execModeSim"> 🟢 Offline Simulation
                                 </label>
                             </div>
                         </div>
 
                         <div class="form-group">
-                            <label style="font-size: 0.8rem; color: var(--text-muted);">CPI Inbound HTTP/HTTPS Endpoint URL</label>
-                            <input type="text" id="targetCpiEndpoint" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-cyan);" placeholder="https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon">
+                            <label style="font-size: 0.8rem; color: var(--text-muted);">Target CPI Inbound Endpoint URL (HTTP POST target)</label>
+                            <input type="text" id="targetCpiEndpoint" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-cyan); background: #0d1117; border: 1px solid var(--border-color); padding: 0.6rem;" placeholder="https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon">
                         </div>
                     </div>
 
