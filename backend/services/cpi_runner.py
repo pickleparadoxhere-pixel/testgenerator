@@ -73,6 +73,16 @@ class CPITestRunner:
         start_time = time.time()
         cpi_endpoint = self.request.cpi_endpoint
         
+        # If runtime credentials with tenant_url are provided, ensure request hits runtime host
+        if self.request.credentials and self.request.credentials.tenant_url and self.request.credentials.tenant_url.startswith("http"):
+            rt_host = self.request.credentials.tenant_url.rstrip("/")
+            if cpi_endpoint.startswith("http"):
+                try:
+                    parsed_ep = urllib.parse.urlparse(cpi_endpoint)
+                    cpi_endpoint = f"{rt_host}{parsed_ep.path}"
+                except Exception:
+                    pass
+        
         headers = {}
         if test_case.payload_type.upper() == "JSON":
             headers["Content-Type"] = "application/json"

@@ -419,6 +419,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     token_url: ext.tokenUrl,
                     tenant_url: ext.hostUrl
                 };
+                if (ext.hostUrl && targetCpiEndpoint) {
+                    const rtHost = ext.hostUrl.replace(/\/$/, '');
+                    const relPath = extractRelativePath(targetCpiEndpoint.value || parsedInboundPath);
+                    targetCpiEndpoint.value = `${rtHost}${relPath}`;
+                    if (!isSimMode) {
+                        reqPayload.cpi_endpoint = targetCpiEndpoint.value;
+                    }
+                }
             } catch (e) {
                 alert("Invalid JSON in Runtime Service Key (it-rt) box.");
                 return;
