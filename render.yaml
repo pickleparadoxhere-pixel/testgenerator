@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: sap-cpi-ai-studio
+    env: python
+    buildCommand: ""
+    startCommand: python3 backend/server.py
+    envVars:
+      - key: PORT
+        value: 10000

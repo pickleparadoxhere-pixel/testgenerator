@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAP CPI AI Test & Mock Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Bar -->
+        <header class="navbar">
+            <div class="logo-group">
+                <div class="logo-icon">⚡</div>
+                <div class="logo-text">
+                    <h1>SAP CPI <span>AI Studio</span></h1>
+                    <p class="subtitle">Automated iFlow Test Generator & Mocking Agent</p>
+                </div>
+            </div>
+            
+            <div class="nav-actions">
+                <div class="badge status-badge" id="systemStatus">
+                    <span class="pulse-dot"></span> System Online
+                </div>
+                <button class="btn btn-secondary" id="btnSampleiFlow">
+                    <span>📦</span> Load Sample iFlow
+                </button>
+                <button class="btn btn-primary" id="btnConnectTenant">
+                    <span>🔑</span> Connect SAP Tenant
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Workbench Layout -->
+        <main class="workbench">
+            <!-- Sidebar Navigation Tabs -->
+            <nav class="sidebar">
+                <button class="nav-tab active" data-tab="tab-import">
+                    <span class="tab-icon">📂</span>
+                    <span class="tab-label">1. iFlow & Schema</span>
+                </button>
+                <button class="nav-tab" data-tab="tab-test-studio">
+                    <span class="tab-icon">🤖</span>
+                    <span class="tab-label">2. AI Test Studio</span>
+                </button>
+                <button class="nav-tab" data-tab="tab-mock-server">
+                    <span class="tab-icon">🛠️</span>
+                    <span class="tab-label">3. Mock Server</span>
+                </button>
+                <button class="nav-tab" data-tab="tab-execution">
+                    <span class="tab-icon">⚡</span>
+                    <span class="tab-label">4. Test Runner</span>
+                </button>
+            </nav>
+
+            <!-- Main Content Display -->
+            <section class="content-area">
+                <!-- TAB 1: iFlow & Schema Import -->
+                <div class="tab-content active" id="tab-import">
+                    <div class="section-header">
+                        <h2>Import & Parse iFlow Package</h2>
+                        <p>Upload an exported SAP CPI iFlow bundle (.zip) or paste working Postman cURL command.</p>
+                    </div>
+
+                    <div class="grid-2col">
+                        <!-- File Upload Card -->
+                        <div class="card drop-zone" id="dropZone">
+                            <div class="drop-zone-icon">☁️</div>
+                            <h3>Drag & Drop iFlow ZIP Archive</h3>
+                            <p>Upload your SAP CPI iFlow <code>.zip</code> package bundle</p>
+                            <input type="file" id="fileInput" accept=".zip" hidden>
+                            <button class="btn btn-primary mt-3" onclick="document.getElementById('fileInput').click()">Browse Files</button>
+                        </div>
+
+                        <!-- Active iFlow Metadata Display -->
+                        <div class="card metadata-card" id="metadataDisplay">
+                            <div class="card-header">
+                                <h3>Parsed iFlow Metadata</h3>
+                                <span class="badge" id="iflowStatusBadge">No iFlow Loaded</span>
+                            </div>
+                            <div class="metadata-body" id="metadataBody">
+                                <div class="empty-state">
+                                    <div class="empty-icon">🔍</div>
+                                    <p>Upload an iFlow ZIP file or load the sample package to get started.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: AI Test Studio -->
+                <div class="tab-content" id="tab-test-studio">
+                    <div class="section-header flex-between">
+                        <div>
+                            <h2>AI Test Suite Synthesis</h2>
+                            <p>Generate Happy Path, Boundary Edge Cases, and Negative test scenarios using Google Gemini AI.</p>
+                        </div>
+                        <button class="btn btn-accent" id="btnGenerateTests">
+                            <span>✨</span> Generate AI Test Cases
+                        </button>
+                    </div>
+
+                    <div class="test-suite-layout">
+                        <!-- Test Cases List -->
+                        <div class="card test-list-card">
+                            <div class="card-header">
+                                <h3>Synthesized Test Cases</h3>
+                                <span class="badge count-badge" id="testCaseCount">0 Cases</span>
+                            </div>
+                            <div class="test-case-list" id="testCaseList">
+                                <div class="empty-state">
+                                    <p>Click "Generate AI Test Cases" to synthesize scenarios for the active iFlow.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Selected Test Case Detail & Code Editor -->
+                        <div class="card test-detail-card">
+                            <div class="card-header flex-between">
+                                <h3 id="selectedTestName">Select a Test Case</h3>
+                                <span class="badge" id="selectedTestCategory">Payload Editor</span>
+                            </div>
+                            <div class="test-detail-body" id="testDetailBody">
+                                <div class="empty-state">
+                                    <p>Select a test case from the list to view and edit payload details.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: Mock Server Console -->
+                <div class="tab-content" id="tab-mock-server">
+                    <div class="section-header flex-between">
+                        <div>
+                            <h2>Dynamic Receiver Mock Server</h2>
+                            <p>Intercepts outbound calls made by SAP CPI to S/4HANA, Salesforce, or HTTP services during test execution.</p>
+                        </div>
+                        <button class="btn btn-secondary" id="btnClearMocks">
+                            <span>🗑️</span> Clear Intercepts
+                        </button>
+                    </div>
+
+                    <div class="grid-2col">
+                        <!-- Active Mock Routes -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Registered Mock Routes</h3>
+                            </div>
+                            <div class="card-body" id="mockRoutesList">
+                                <p class="text-muted">No mock rules active. Generate test cases to configure automatic receiver rules.</p>
+                            </div>
+                        </div>
+
+                        <!-- Real-time Intercepted Request Log -->
+                        <div class="card">
+                            <div class="card-header flex-between">
+                                <h3>Intercepted Outbound Calls</h3>
+                                <button class="btn btn-sm btn-secondary" id="btnRefreshIntercepts">Refresh</button>
+                            </div>
+                            <div class="card-body console-body" id="interceptsLog">
+                                <div class="empty-state">
+                                    <p>No outbound calls intercepted yet. Execute a test run to view live CPI receiver requests.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: Test Execution & Live Logs -->
+                <div class="tab-content" id="tab-execution">
+                    <div class="section-header flex-between">
+                        <div>
+                            <h2>Test Suite Execution & Assertion Engine</h2>
+                            <p>Run test scenarios against SAP CPI endpoints and verify Message Processing Logs (MPL).</p>
+                        </div>
+                        <button class="btn btn-primary" id="btnRunSuite">
+                            <span>⚡</span> Execute Full Test Suite
+                        </button>
+                    </div>
+
+                    <!-- Summary Stats Bar -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-value" id="statTotal">0</span>
+                            <span class="stat-label">Total Executed</span>
+                        </div>
+                        <div class="stat-card stat-pass">
+                            <span class="stat-value" id="statPassed">0</span>
+                            <span class="stat-label">Passed</span>
+                        </div>
+                        <div class="stat-card stat-fail">
+                            <span class="stat-value" id="statFailed">0</span>
+                            <span class="stat-label">Failed</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value" id="statDuration">0 ms</span>
+                            <span class="stat-label">Total Duration</span>
+                        </div>
+                    </div>
+
+                    <!-- Execution Results Table -->
+                    <div class="card mt-4">
+                        <div class="card-header flex-between">
+                            <h3>Test Execution Results</h3>
+                            <button class="btn btn-sm btn-secondary" id="btnExportJUnit" style="display:none;">
+                                📄 Export JUnit XML
+                            </button>
+                        </div>
+                        <div class="card-body p-0">
+                            <table class="data-table" id="resultsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Status</th>
+                                        <th>ID</th>
+                                        <th>Scenario Name</th>
+                                        <th>Category</th>
+                                        <th>Duration</th>
+                                        <th>CPI MPL ID</th>
+                                        <th>Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsTableBody">
+                                    <tr>
+                                        <td colspan="7" class="text-center p-4 text-muted">No execution runs recorded yet. Click "Execute Full Test Suite".</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Direct Postman cURL Modal -->
+    <div class="modal-overlay" id="tenantModal">
+        <div class="modal-card" style="width: 560px;">
+            <div class="modal-header">
+                <h3>Paste Postman cURL Command</h3>
+                <button class="close-btn" onclick="document.getElementById('tenantModal').classList.remove('active')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 8px; padding: 0.8rem; font-size: 0.82rem; margin-bottom: 1rem;">
+                    💡 Right-click your working request in Postman &rarr; <strong>Copy as cURL</strong> &rarr; Paste it below! All headers, cookies, and tokens will be preserved 100%.
+                </div>
+
+                <div class="form-group">
+                    <label>Paste Working Postman cURL Command</label>
+                    <textarea id="rawCurlInput" class="code-editor" style="height: 140px; font-size: 0.75rem;" placeholder="curl --location 'https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/api/v1/IntegrationDesigntimeArtifacts(Id=\'Horizon\',Version=\'active\')' --user 'client_id:secret'"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="document.getElementById('tenantModal').classList.remove('active')">Cancel</button>
+                <button class="btn btn-primary" id="btnSubmitTenant">Execute cURL & Fetch iFlow</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- iFlow Selector Modal -->
+    <div class="modal-overlay" id="iflowPickerModal">
+        <div class="modal-card" style="width: 580px;">
+            <div class="modal-header">
+                <h3>Select an iFlow to Test</h3>
+                <button class="close-btn" onclick="document.getElementById('iflowPickerModal').classList.remove('active')">&times;</button>
+            </div>
+            <div class="modal-body" style="max-height: 400px; overflow-y: auto;" id="iflowPickerList">
+                <!-- Dynamically populated iFlow list -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="document.getElementById('iflowPickerModal').classList.remove('active')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
