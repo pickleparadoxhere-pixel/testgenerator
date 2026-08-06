@@ -38,26 +38,9 @@ def extract_zip_from_multipart(raw_bytes: bytes) -> bytes:
     return raw_bytes
 
 def parse_and_execute_raw_curl(curl_str: str) -> tuple[dict, str]:
-    """
-    Executes raw cURL string using system shell (`shell=True`) so bash/zsh handles
-    all quote escaping ('\'') identically to terminal and Postman.
-    """
-    cleaned = curl_str.strip()
-    if not cleaned.startswith("curl"):
-        raise ValueError("Pasted string must start with 'curl'")
-
-    cmd_str = cleaned.replace("\\\n", " ").replace("\n", " ")
-    
-    print(f"Executing shell cURL command: {cmd_str[:200]}...")
-    res = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, timeout=25)
+    cleaned = curl_str.strip().replace("\\\n", " ").replace("\n", " ")
+    res = subprocess.run(cleaned, shell=True, capture_output=True, text=True, timeout=25)
     stdout = res.stdout.strip()
-    stderr = res.stderr.strip()
-
-    print(f"cURL Exit Code: {res.returncode}")
-    print(f"cURL Raw Output (first 400 chars):\n{stdout[:400]}")
-    if stderr:
-        print(f"cURL Stderr:\n{stderr}")
-
     json_str = stdout
     if "\r\n\r\n" in stdout:
         json_str = stdout.split("\r\n\r\n")[-1]
@@ -88,6 +71,29 @@ def fetch_oauth_bearer_token(token_url: str, client_id: str, client_secret: str)
         body = json.loads(resp.read().decode("utf-8"))
         return body.get("access_token", "")
 
+def fetch_cpi_odata_json(url: str, token: str) -> dict:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+def download_cpi_iflow_zip(url: str, token: str) -> bytes:
+    headers = {"Authorization": f"Bearer {token}"}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+        return resp.read()
+
 class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def _set_json_headers(self, status=200):
@@ -96,6 +102,7 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
         self.send_header("Access-Control-Allow-Headers", "*")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
 
     def do_OPTIONS(self):
@@ -118,17 +125,19 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             iflow_id = path.split("/")[-1]
             zip_bytes = None
             fetch_error = None
-            
-            # Fetch real iFlow zip bundle if OAuth / cURL available
-            if active_cpi_creds.get("raw_curl"):
+
+            # Download REAL live iFlow ZIP bundle via OAuth Bearer Token
+            if active_cpi_creds.get("tenant_url") and active_cpi_creds.get("bearer_token"):
                 try:
-                    raw_curl = active_cpi_creds["raw_curl"]
-                    if "/$value" not in raw_curl:
-                        val_curl = raw_curl.replace("')", "')/$value").replace("%27)", "%27)/$value")
-                        res = subprocess.run(val_curl, shell=True, capture_output=True, timeout=25)
-                        zip_bytes = res.stdout
+                    tenant_clean = active_cpi_creds["tenant_url"].rstrip("/")
+                    token = active_cpi_creds["bearer_token"]
+                    version = active_cpi_creds.get("version", "active")
+                    val_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='{version}')/$value"
+                    
+                    zip_bytes = download_cpi_iflow_zip(val_url, token)
                 except Exception as e:
                     fetch_error = str(e)
+                    print(f"Error downloading live ZIP for '{iflow_id}': {e}")
 
             if not zip_bytes or len(zip_bytes) < 100:
                 zip_bytes = create_sample_iflow_zip()
@@ -139,7 +148,7 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                 metadata.name = iflow_id.replace("_", " ").title()
 
             if fetch_error:
-                metadata.description = f"Notice: ZIP bundle download note ({fetch_error}). Displaying parsed metadata structure."
+                metadata.description = f"Notice: Live ZIP download note ({fetch_error}). Displaying parsed structure."
 
             self._set_json_headers(200)
             self.wfile.write(json.dumps(metadata.dict()).encode())
@@ -173,7 +182,7 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/v1/cpi/connect":
             creds = json.loads(body_bytes.decode("utf-8") or "{}")
 
-            # Unwrap BTP Service Key JSON if present
+            # Unwrap BTP Service Key JSON
             if "oauth" in creds and isinstance(creds["oauth"], dict):
                 oauth = creds["oauth"]
                 tenant_url = oauth.get("url") or creds.get("tenant_url")
@@ -204,27 +213,16 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                         self._set_json_headers(200)
                         self.wfile.write(json.dumps({
                             "status": "LIVE_SUCCESS",
-                            "message": f"Successfully executed Postman cURL! Fetched iFlow '{iflow_id}'.",
+                            "message": f"Successfully executed cURL! Fetched iFlow '{iflow_id}'.",
                             "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
                         }).encode())
                         return
-                    else:
-                        self._set_json_headers(400)
-                        self.wfile.write(json.dumps({
-                            "status": "ERROR",
-                            "error": f"cURL Response Output:\n\n{raw_stdout[:600]}"
-                        }).encode())
-                        return
                 except Exception as e:
-                    self._set_json_headers(400)
-                    self.wfile.write(json.dumps({"status": "ERROR", "error": f"Failed cURL execution: {str(e)}"}).encode())
-                    return
+                    pass
 
-            # Native OAuth 2.0 Flow with BTP Service Key credentials
             if tenant_url and client_id and client_secret:
                 tenant_clean = tenant_url.rstrip("/")
                 if not token_url:
-                    # Derivation from tenant domain if missing
                     subdomain = tenant_clean.split("//")[-1].split(".")[0]
                     token_url = f"https://{subdomain}.authentication.ap21.hana.ondemand.com/oauth/token"
 
@@ -233,38 +231,63 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                     if bearer_token:
                         active_cpi_creds["tenant_url"] = tenant_clean
                         active_cpi_creds["bearer_token"] = bearer_token
+                        active_cpi_creds["version"] = version
 
-                        # Call OData designtime artifacts API
+                        # Query specific iFlow designtime metadata first
                         odata_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_name}',Version='{version}')"
-                        curl_cmd = f"curl -s -k -H 'Authorization: Bearer {bearer_token}' -H 'Accept: application/json' '{odata_url}'"
-                        res_json, raw_out = parse_and_execute_raw_curl(curl_cmd)
+                        try:
+                            res_data = fetch_cpi_odata_json(odata_url, bearer_token)
+                            if res_data and "d" in res_data:
+                                item = res_data.get("d", {})
+                                iflow_id = item.get("Id", iflow_name)
+                                name = item.get("Name") or iflow_id
+                                ver = item.get("Version", version)
+                                pkg = item.get("PackageId", "DefaultPackage")
 
-                        if res_json and "d" in res_json:
-                            item = res_json.get("d", {})
-                            iflow_id = item.get("Id", iflow_name)
-                            name = item.get("Name") or iflow_id
-                            ver = item.get("Version", version)
-                            pkg = item.get("PackageId", "DefaultPackage")
+                                self._set_json_headers(200)
+                                self.wfile.write(json.dumps({
+                                    "status": "LIVE_SUCCESS",
+                                    "message": f"Connected to SAP CPI! Fetched live iFlow '{iflow_id}'.",
+                                    "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
+                                }).encode())
+                                return
+                        except Exception as ex_single:
+                            print(f"Single iFlow OData query note: {ex_single}")
 
-                            self._set_json_headers(200)
-                            self.wfile.write(json.dumps({
-                                "status": "LIVE_SUCCESS",
-                                "message": f"Successfully authenticated via BTP OAuth! Fetched iFlow '{iflow_id}'.",
-                                "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
-                            }).encode())
-                            return
-                        else:
-                            self._set_json_headers(400)
-                            self.wfile.write(json.dumps({
-                                "status": "ERROR",
-                                "error": f"BTP OData API Output:\n\n{raw_out[:600]}"
-                            }).encode())
-                            return
+                        # Fallback: Query IntegrationRuntimeArtifacts
+                        runtime_url = f"{tenant_clean}/api/v1/IntegrationRuntimeArtifacts"
+                        try:
+                            runtime_data = fetch_cpi_odata_json(runtime_url, bearer_token)
+                            results = runtime_data.get("d", {}).get("results", [])
+                            iflows = [{
+                                "id": item.get("Id"),
+                                "name": item.get("Name") or item.get("Id"),
+                                "version": item.get("Version", "active"),
+                                "package_id": "DeployedRuntime"
+                            } for item in results if item.get("Id")]
+
+                            if iflows:
+                                self._set_json_headers(200)
+                                self.wfile.write(json.dumps({
+                                    "status": "LIVE_SUCCESS",
+                                    "message": f"Connected to SAP CPI! Fetched {len(iflows)} deployed runtime iFlows.",
+                                    "iflows": iflows
+                                }).encode())
+                                return
+                        except Exception as ex_rt:
+                            print(f"Runtime artifacts OData query note: {ex_rt}")
+
+                        self._set_json_headers(400)
+                        self.wfile.write(json.dumps({
+                            "status": "ERROR",
+                            "error": f"Connected & authenticated with BTP OAuth, but iFlow '{iflow_name}' was not found. Please verify the exact iFlow ID."
+                        }).encode())
+                        return
                 except Exception as e:
                     self._set_json_headers(400)
                     self.wfile.write(json.dumps({
                         "status": "ERROR",
-                        "error": f"OAuth token request failed: {str(e)}"
+                        "error": f"OAuth token authentication error: {str(e)}"
                     }).encode())
                     return
 
