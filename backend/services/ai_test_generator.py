@@ -34,7 +34,7 @@ class AITestGenerator:
             except Exception as e:
                 logger.error(f"Gemini API error, falling back to rule-based engine: {e}", exc_info=True)
 
-        # Fallback to intelligent rule-based synthesis tailored to iFlow metadata
+        # Fallback to intelligent rule-based synthesis tailored to iFlow metadata & schemas
         logger.info("Using intelligent rule-based engine for test synthesis.")
         return self._generate_rule_based_test_cases(metadata, request.num_cases_per_category)
 
@@ -46,7 +46,7 @@ class AITestGenerator:
         
         prompt = f"""
 You are an expert SAP Integration Suite (CPI) QA Automation Engineer.
-Generate a comprehensive automated test suite tailored SPECIFICALLY to the following iFlow:
+Generate an automated test suite tailored SPECIFICALLY to the following iFlow:
 
 iFlow Name: {metadata.name} (ID: {metadata.id})
 Inbound Endpoint: {metadata.inbound_endpoint.name} ({metadata.inbound_endpoint.adapter_type} at {metadata.inbound_endpoint.url_path})
@@ -55,12 +55,16 @@ Receiver Systems to Mock: {receivers_summary}
 Detected Groovy Scripts: {scripts_summary}
 Detected XSLT / Mappings: {mappings_summary}
 
-Extracted iFlow Code, BPMN XML, Groovy Scripts, Schemas & Context:
+Attached Message Mappings, WSDLs, XSDs, Groovy Scripts, BPMN XML, and iFlow Context:
 {metadata.inbound_endpoint.raw_schema or 'No schema attached.'}
 
 CRITICAL MANDATE:
-Analyze the attached iFlow BPMN XML, Groovy scripts, mappings, and iFlow name ({metadata.name}) to construct exact root XML tags, JSON keys, data types, and business fields required by THIS iFlow.
-Do NOT output generic "OrderHeader" or "SalesOrg" fields unless they are explicitly present in the iFlow definition!
+Analyze the attached Message Mapping WSDLs, XSD definitions, Groovy scripts, and BPMN XML to identify the exact SOURCE inbound XML/JSON message structure, target namespace, root element name, complex types, child elements, and attributes.
+
+For example, if a WSDL defines `<element name="ProductHierarchy" type="ProductHierarchy">` under targetNamespace `http://demo.sap.com/mapping/context`, your test payloads MUST be XML matching that exact structure:
+`<p1:ProductHierarchy xmlns:p1="http://demo.sap.com/mapping/context"><MainCategory Name="Category1"><Category Name="Sub1"><Product>ItemA</Product></Category></MainCategory></p1:ProductHierarchy>`
+
+Do NOT output generic OrderRequest or JSON payloads when WSDL/XSD XML schemas are attached!
 
 INSTRUCTIONS:
 Generate exactly:
@@ -75,7 +79,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
     "name": "Happy Path - Valid Scenario for {metadata.name}",
     "category": "happy_path",
     "description": "Tests successful processing with valid payload fields for {metadata.name}",
-    "payload": "<{metadata.id}Request>...</{metadata.id}Request>",
+    "payload": "<p1:Root xmlns:p1=\\"...\\">...</p1:Root>",
     "payload_type": "{metadata.inbound_endpoint.payload_format}",
     "expected_status": 200,
     "assertions": [
@@ -125,26 +129,45 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
     def _generate_rule_based_test_cases(self, metadata: IFlowMetadata, cases_per_cat: int) -> List[TestCase]:
         format_type = metadata.inbound_endpoint.payload_format.upper()
         main_receiver = metadata.receiver_endpoints[0].name if metadata.receiver_endpoints else "Backend_System"
-        iflow_tag = re.sub(r'[^a-zA-Z0-9]', '', metadata.id or metadata.name) or "IntegrationData"
-
-        # Inspect raw_schema for custom keys / tags
         raw_schema = metadata.inbound_endpoint.raw_schema or ""
-        discovered_keys = re.findall(r'\"([a-zA-Z0-9_]+)\"\s*:', raw_schema)
-        discovered_tags = re.findall(r'<([a-zA-Z0-9_]+)>', raw_schema)
-        
-        filtered_tags = [t for t in discovered_tags if t not in ["property", "key", "value", "bpmn2", "ifl", "definitions", "collaboration", "participant", "extensionElements"]]
 
         cases: List[TestCase] = []
 
-        if format_type == "XML":
-            root_tag = filtered_tags[0] if filtered_tags else f"{iflow_tag}Request"
+        # Check for specific SAP WSDL / XSD schemas (like ProductHierarchy)
+        if "ProductHierarchy" in raw_schema:
+            target_ns = "http://demo.sap.com/mapping/context"
+            happy_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
+    <MainCategory Name="Electronics">
+        <Category Name="Laptops">
+            <Product>MacBook Pro</Product>
+            <Product>ThinkPad X1</Product>
+        </Category>
+    </MainCategory>
+</p1:ProductHierarchy>"""
+
+            boundary_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
+    <MainCategory Name="ÖÄÜ_Category_&amp;_Special">
+        <Category Name="Cat_Max">
+            <Product>Product_Long_Text_Limit_Testing_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</Product>
+        </Category>
+    </MainCategory>
+</p1:ProductHierarchy>"""
+
+            negative_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
+    <!-- Missing mandatory MainCategory element -->
+</p1:ProductHierarchy>"""
+
+        elif format_type == "XML":
+            discovered_tags = re.findall(r'<([a-zA-Z0-9_]+)>', raw_schema)
+            filtered_tags = [t for t in discovered_tags if t not in ["property", "key", "value", "bpmn2", "ifl", "definitions", "collaboration", "participant", "extensionElements"]]
+            root_tag = filtered_tags[0] if filtered_tags else f"{metadata.id}Request"
             sub_tag = filtered_tags[1] if len(filtered_tags) > 1 else "Header"
             field_tag = filtered_tags[2] if len(filtered_tags) > 2 else "TransactionID"
 
             happy_payload = f"""<{root_tag}>
     <{sub_tag}>
         <{field_tag}>TRX-100456</{field_tag}>
-        <SourceSystem>SAP_CPI_{iflow_tag}</SourceSystem>
+        <SourceSystem>SAP_CPI_{metadata.id}</SourceSystem>
         <Timestamp>{time.strftime('%Y-%m-%dT%H:%M:%SZ')}</Timestamp>
     </{sub_tag}>
 </{root_tag}>"""
@@ -159,25 +182,25 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
 
             negative_payload = f"""<{root_tag}>
     <{sub_tag}>
-        <!-- Mandatory {field_tag} field omitted to test iFlow exception handling -->
-        <SourceSystem>INVALID</SourceSystem>
+        <!-- Mandatory {field_tag} field omitted -->
     </{sub_tag}>
 </{root_tag}>"""
 
         else:
+            discovered_keys = re.findall(r'\"([a-zA-Z0-9_]+)\"\s*:', raw_schema)
             key1 = discovered_keys[0] if discovered_keys else "transactionId"
             key2 = discovered_keys[1] if len(discovered_keys) > 1 else "sourceSystem"
 
             happy_payload = json.dumps({
-                iflow_tag: {
+                metadata.id: {
                     key1: "TRX-100456",
-                    key2: f"SAP_CPI_{iflow_tag}",
+                    key2: f"SAP_CPI_{metadata.id}",
                     "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ')
                 }
             }, indent=2)
 
             boundary_payload = json.dumps({
-                iflow_tag: {
+                metadata.id: {
                     key1: "TRX-ÖÄÜ-&-SPECIAL-#999",
                     key2: "SAP_CPI_MAX_LIMIT_TEST",
                     "notes": "A" * 300
@@ -185,7 +208,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
             }, indent=2)
 
             negative_payload = json.dumps({
-                iflow_tag: {
+                metadata.id: {
                     key2: "INVALID"
                 }
             }, indent=2)
@@ -204,7 +227,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
             ],
             mock_rules=[
                 MockResponseRule(
-                    receiver_name=main_receiver,
+                    receiver_name=metadata.receiver_endpoints[0].name if metadata.receiver_endpoints else "Receiver_System",
                     response_status=200,
                     response_body=json.dumps({"status": "SUCCESS", "iFlow": metadata.id, "message": "Processed successfully"})
                 )
@@ -224,7 +247,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
             ],
             mock_rules=[
                 MockResponseRule(
-                    receiver_name=main_receiver,
+                    receiver_name=metadata.receiver_endpoints[0].name if metadata.receiver_endpoints else "Receiver_System",
                     response_status=200,
                     response_body=json.dumps({"status": "SUCCESS", "warnings": ["High length field"]})
                 )
@@ -244,7 +267,7 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
             ],
             mock_rules=[
                 MockResponseRule(
-                    receiver_name=main_receiver,
+                    receiver_name=metadata.receiver_endpoints[0].name if metadata.receiver_endpoints else "Receiver_System",
                     response_status=400,
                     response_body=json.dumps({"error": "BAD_REQUEST", "message": "Required field missing"})
                 )

@@ -36,15 +36,16 @@ class IFlowParser:
                 receiver_endpoints: List[ReceiverEndpoint] = []
                 raw_schema_content = ""
 
-                # 1. Extract Schema and Mapping files
+                # Detect XML schemas/wsdl/mmap to set correct payload format
+                has_xml_schema = any(p.endswith(".xsd") or p.endswith(".wsdl") or p.endswith(".mmap") or p.endswith(".xsl") or p.endswith(".xslt") for p in file_list)
+                if has_xml_schema:
+                    payload_format = "XML"
+
+                # 1. Extract Schema and Mapping files (WSDLs, XSDs, Message Mappings)
                 for sf in schema_files:
                     try:
                         content = z.read(sf).decode("utf-8", errors="ignore")
-                        raw_schema_content += f"\n--- Schema/Mapping File: {sf} ---\n" + content[:2500]
-                        if sf.endswith(".json"):
-                            payload_format = "JSON"
-                        elif sf.endswith(".xsd") or sf.endswith(".wsdl") or sf.endswith(".mmap"):
-                            payload_format = "XML"
+                        raw_schema_content += f"\n--- Schema / Mapping / WSDL File: {sf} ---\n" + content[:4000]
                     except Exception:
                         pass
 
@@ -52,7 +53,7 @@ class IFlowParser:
                 for gs in groovy_scripts:
                     try:
                         content = z.read(gs).decode("utf-8", errors="ignore")
-                        raw_schema_content += f"\n--- Groovy Script: {gs} ---\n" + content[:2000]
+                        raw_schema_content += f"\n--- Groovy Script: {gs} ---\n" + content[:3000]
                     except Exception:
                         pass
 
@@ -67,7 +68,7 @@ class IFlowParser:
                 # 4. Extract BPMN .iflw Flow Definition XML
                 if component_xml_path:
                     xml_content = z.read(component_xml_path).decode("utf-8", errors="ignore")
-                    raw_schema_content += f"\n--- iFlow BPMN Definition ({component_xml_path}) ---\n" + xml_content[:3000]
+                    raw_schema_content += f"\n--- iFlow BPMN Definition ({component_xml_path}) ---\n" + xml_content[:4000]
                     
                     parsed_component = self._parse_xml_tree(xml_content)
                     
