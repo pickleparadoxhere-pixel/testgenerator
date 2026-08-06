@@ -58,9 +58,9 @@ def extract_service_key_fields(key_dict: dict) -> dict:
     token_url = src.get("tokenurl") or src.get("token_url") or ""
     return {
         "host_url": host_url.rstrip("/"),
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "token_url": token_url
+        "client_id": client_id.strip(),
+        "client_secret": client_secret.strip(),
+        "token_url": token_url.strip()
     }
 
 async def discover_cpi_full_endpoint(tenant_url: str, token: str, iflow_id: str) -> Optional[str]:
@@ -107,7 +107,6 @@ async def parse_iflow_zip(file: UploadFile = File(...)):
 
 @app.post("/api/v1/cpi/connect")
 async def connect_cpi_tenant(body: Dict[str, Any] = Body(...)):
-    raw_curl = body.get("raw_curl", "")
     tenant_url = body.get("tenant_url", "")
     client_id = body.get("client_id", "")
     client_secret = body.get("client_secret", "")
@@ -137,6 +136,15 @@ async def connect_cpi_tenant(body: Dict[str, Any] = Body(...)):
             active_session["tenant_url"] = tenant_clean
             active_session["bearer_token"] = token
             active_session["version"] = version
+
+            # Auto-store as runtime_creds if it's an it-rt key
+            if "it-rt" in client_id.lower() or "-rt" in tenant_clean.lower():
+                active_session["runtime_creds"] = CPICredentials(
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    token_url=token_url,
+                    tenant_url=tenant_clean
+                )
 
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
@@ -235,6 +243,11 @@ async def generate_test_suite(request: TestSuiteGenerationRequest):
 @app.post("/api/v1/testsuite/run", response_model=TestSuiteReport)
 async def run_test_suite(request: TestExecutionRequest):
     token = active_session.get("bearer_token")
+    rt_creds = active_session.get("runtime_creds")
+    
+    if not request.credentials and rt_creds:
+        request.credentials = rt_creds
+        
     runner = CPITestRunner(request, default_bearer_token=token)
     report = runner.execute_suite()
     return report

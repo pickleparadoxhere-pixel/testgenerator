@@ -258,6 +258,14 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                         active_cpi_creds["bearer_token"] = bearer_token
                         active_cpi_creds["version"] = version
 
+                        if "it-rt" in client_id.lower() or "-rt" in tenant_clean.lower():
+                            active_cpi_creds["runtime_creds"] = {
+                                "client_id": client_id,
+                                "client_secret": client_secret,
+                                "token_url": token_url,
+                                "tenant_url": tenant_clean
+                            }
+
                         # Query specific iFlow designtime metadata first
                         odata_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_name}',Version='{version}')"
                         try:
@@ -343,8 +351,13 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             test_cases = [TestCase.from_dict(rc) for rc in raw_cases]
 
             token = active_cpi_creds.get("bearer_token")
+            req_creds = body_json.get("credentials")
+            if not req_creds and active_cpi_creds.get("runtime_creds"):
+                req_creds = active_cpi_creds["runtime_creds"]
+
             req = TestExecutionRequest(
                 cpi_endpoint=body_json.get("cpi_endpoint", "simulated"),
+                credentials=req_creds,
                 test_cases=test_cases,
                 enable_mpl_check=body_json.get("enable_mpl_check", True)
             )
