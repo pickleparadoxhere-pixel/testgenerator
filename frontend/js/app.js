@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let selectedTestCase = null;
     let lastReport = null;
     let connectedHostUrl = "";
+    let parsedInboundPath = "/http/horizon";
 
     // UI Elements
     const navTabs = document.querySelectorAll(".nav-tab");
@@ -17,7 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const iflowPickerList = document.getElementById("iflowPickerList");
     const btnSubmitTenant = document.getElementById("btnSubmitTenant");
     const serviceKeyJson = document.getElementById("serviceKeyJson");
-    const rawCurlInput = document.getElementById("rawCurlInput");
+    const itRtServiceKeyJson = document.getElementById("itRtServiceKeyJson");
     const fileInput = document.getElementById("fileInput");
     const dropZone = document.getElementById("dropZone");
     const btnGenerateTests = document.getElementById("btnGenerateTests");
@@ -26,63 +27,74 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnRefreshIntercepts = document.getElementById("btnRefreshIntercepts");
     const btnExportJUnit = document.getElementById("btnExportJUnit");
     const targetCpiEndpoint = document.getElementById("targetCpiEndpoint");
+    const runtimeAuthType = document.getElementById("runtimeAuthType");
 
-    // --- Service Key JSON Auto-Fill ---
+    // --- Service Key JSON Helper ---
+    function extractServiceKeyFields(keyObj) {
+        if (!keyObj || typeof keyObj !== 'object') return {};
+        let src = keyObj.oauth || keyObj.credentials || keyObj.service_key || keyObj;
+        let hostUrl = src.url || src.management_url || src.service_url || src.api || '';
+        if (!hostUrl && src.endpoints) {
+            hostUrl = src.endpoints.api || src.endpoints.url || src.endpoints.web || '';
+        }
+        let clientId = src.clientid || src.client_id || (src.oauth ? (src.oauth.clientid || src.oauth.client_id) : '');
+        let clientSecret = src.clientsecret || src.client_secret || (src.oauth ? (src.oauth.clientsecret || src.oauth.client_secret) : '');
+        let tokenUrl = src.tokenurl || src.token_url || (src.oauth ? (src.oauth.tokenurl || src.oauth.token_url) : '');
+        return { hostUrl: hostUrl.trim(), clientId: clientId.trim(), clientSecret: clientSecret.trim(), tokenUrl: tokenUrl.trim() };
+    }
+
+    // --- Management Service Key (api) Auto-Fill ---
     if (serviceKeyJson) {
         serviceKeyJson.addEventListener("input", () => {
             const raw = serviceKeyJson.value.trim();
             if (!raw) return;
             try {
                 const parsed = JSON.parse(raw);
-                const extracted = extractServiceKeyFields(parsed);
+                const ext = extractServiceKeyFields(parsed);
 
-                if (extracted.hostUrl && document.getElementById("cpiHost")) {
-                    document.getElementById("cpiHost").value = extracted.hostUrl;
-                    connectedHostUrl = extracted.hostUrl;
+                if (ext.hostUrl && document.getElementById("cpiHost")) {
+                    document.getElementById("cpiHost").value = ext.hostUrl;
+                    connectedHostUrl = ext.hostUrl;
                 }
-                if (extracted.clientId && document.getElementById("clientId")) document.getElementById("clientId").value = extracted.clientId;
-                if (extracted.clientSecret && document.getElementById("clientSecret")) document.getElementById("clientSecret").value = extracted.clientSecret;
-                if (extracted.tokenUrl && document.getElementById("tokenUrl")) document.getElementById("tokenUrl").value = extracted.tokenUrl;
-            } catch (e) {
-                // Ignore while user is typing incomplete JSON
-            }
+                if (ext.clientId && document.getElementById("clientId")) document.getElementById("clientId").value = ext.clientId;
+                if (ext.clientSecret && document.getElementById("clientSecret")) document.getElementById("clientSecret").value = ext.clientSecret;
+                if (ext.tokenUrl && document.getElementById("tokenUrl")) document.getElementById("tokenUrl").value = ext.tokenUrl;
+            } catch (e) {}
         });
     }
 
-    function extractServiceKeyFields(keyObj) {
-        if (!keyObj || typeof keyObj !== 'object') return {};
-        
-        let src = keyObj.oauth || keyObj.credentials || keyObj.service_key || keyObj;
-        
-        let hostUrl = src.url || src.management_url || src.service_url || src.api || '';
-        if (!hostUrl && src.endpoints) {
-            hostUrl = src.endpoints.api || src.endpoints.url || src.endpoints.web || '';
-        }
-        
-        let clientId = src.clientid || src.client_id || (src.oauth ? (src.oauth.clientid || src.oauth.client_id) : '');
-        let clientSecret = src.clientsecret || src.client_secret || (src.oauth ? (src.oauth.clientsecret || src.oauth.client_secret) : '');
-        let tokenUrl = src.tokenurl || src.token_url || (src.oauth ? (src.oauth.tokenurl || src.oauth.token_url) : '');
+    // --- Runtime Service Key (it-rt) Auto-Fill Endpoint & Credentials ---
+    if (itRtServiceKeyJson) {
+        itRtServiceKeyJson.addEventListener("input", updateTargetEndpointFromItRt);
+    }
 
-        return { hostUrl, clientId, clientSecret, tokenUrl };
+    function updateTargetEndpointFromItRt() {
+        if (!itRtServiceKeyJson) return;
+        const raw = itRtServiceKeyJson.value.trim();
+        if (!raw) return;
+        try {
+            const parsed = JSON.parse(raw);
+            const ext = extractServiceKeyFields(parsed);
+            if (ext.hostUrl && targetCpiEndpoint) {
+                const rtHost = ext.hostUrl.replace(/\/$/, '');
+                let inPath = parsedInboundPath;
+                if (!inPath.startsWith("/")) inPath = "/" + inPath;
+                if (!inPath.startsWith("/http/") && !inPath.startsWith("/cxf/")) {
+                    inPath = "/http" + inPath;
+                }
+                targetCpiEndpoint.value = `${rtHost}${inPath}`;
+            }
+        } catch (e) {}
     }
 
     // --- Tab Navigation ---
     navTabs.forEach(tab => {
-        tab.addEventListener("click", () => {
-            const target = tab.getAttribute("data-tab");
-            switchTab(target);
-        });
+        tab.addEventListener("click", () => switchTab(tab.getAttribute("data-tab")));
     });
 
     function switchTab(tabId) {
-        navTabs.forEach(t => {
-            if (t.getAttribute("data-tab") === tabId) t.classList.add("active");
-            else t.classList.remove("active");
-        });
-        tabContents.forEach(c => {
-            if (c.id === tabId) c.classList.add("active");
-            else c.classList.remove("active");
-        });
+        navTabs.forEach(t => t.classList.toggle("active", t.getAttribute("data-tab") === tabId));
+        tabContents.forEach(c => c.classList.toggle("active", c.id === tabId));
     }
 
     // --- Load Sample iFlow ---
@@ -104,41 +116,24 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // --- File Drag & Drop Upload ---
-    dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("dragover");
-    });
-
+    dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("dragover"); });
     dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
-
     dropZone.addEventListener("drop", (e) => {
         e.preventDefault();
         dropZone.classList.remove("dragover");
-        if (e.dataTransfer.files.length) {
-            handleFileUpload(e.dataTransfer.files[0]);
-        }
+        if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]);
     });
 
     fileInput.addEventListener("change", (e) => {
-        if (e.target.files.length) {
-            handleFileUpload(e.target.files[0]);
-        }
+        if (e.target.files.length) handleFileUpload(e.target.files[0]);
     });
 
     async function handleFileUpload(file) {
-        if (!file.name.endsWith(".zip")) {
-            alert("Please upload an iFlow .zip bundle");
-            return;
-        }
-
+        if (!file.name.endsWith(".zip")) { alert("Please upload an iFlow .zip bundle"); return; }
         const formData = new FormData();
         formData.append("file", file);
-
         try {
-            const res = await fetch("/api/v1/iflow/parse", {
-                method: "POST",
-                body: formData
-            });
+            const res = await fetch("/api/v1/iflow/parse", { method: "POST", body: formData });
             if (res.ok) {
                 currentIFlow = await res.json();
                 await onIFlowLoaded(currentIFlow);
@@ -146,33 +141,32 @@ document.addEventListener("DOMContentLoaded", () => {
                 const err = await res.json();
                 alert("Upload failed: " + (err.detail || err.error));
             }
-        } catch (err) {
-            alert("Upload error: " + err.message);
-        }
+        } catch (err) { alert("Upload error: " + err.message); }
     }
 
     // --- Process Loaded iFlow ---
     async function onIFlowLoaded(metadata) {
         renderIFlowMetadata(metadata);
         
-        // Auto-fill target CPI endpoint URL in Section 4
-        if (targetCpiEndpoint) {
-            let inPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/http/horizon";
-            if (!inPath.startsWith("/")) inPath = "/" + inPath;
-            if (!inPath.startsWith("/http/") && !inPath.startsWith("/cxf/")) {
-                inPath = "/http" + inPath;
+        parsedInboundPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/http/horizon";
+        
+        if (itRtServiceKeyJson && itRtServiceKeyJson.value.trim()) {
+            updateTargetEndpointFromItRt();
+        } else if (targetCpiEndpoint) {
+            let inPath = parsedInboundPath;
+            if (inPath.startsWith("http://") || inPath.startsWith("https://")) {
+                targetCpiEndpoint.value = inPath;
+            } else {
+                if (!inPath.startsWith("/")) inPath = "/" + inPath;
+                if (!inPath.startsWith("/http/") && !inPath.startsWith("/cxf/")) {
+                    inPath = "/http" + inPath;
+                }
+                const host = connectedHostUrl ? connectedHostUrl.replace(/\/$/, '') : "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com";
+                targetCpiEndpoint.value = `${host}${inPath}`;
             }
-            
-            const host = connectedHostUrl ? connectedHostUrl.replace(/\/$/, '') : "https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com";
-            targetCpiEndpoint.value = `${host}${inPath}`;
         }
 
-        // Auto-generate AI Test Suite & Register Mock Rules
-        if (btnGenerateTests) {
-            await generateTestSuiteInternal(metadata);
-        }
-        
-        // Auto-switch to Step 2: AI Test Studio
+        if (btnGenerateTests) await generateTestSuiteInternal(metadata);
         switchTab("tab-test-studio");
     }
 
@@ -182,9 +176,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("iflowStatusBadge").innerText = `Active: ${metadata.id || metadata.name}`;
 
         const receiversHtml = metadata.receiver_endpoints.map(r => 
-            `<span class="badge" style="background: rgba(139, 92, 246, 0.15); border-color: var(--accent-purple);">
-                ${r.name} (${r.adapter_type})
-             </span>`
+            `<span class="badge" style="background: rgba(139, 92, 246, 0.15); border-color: var(--accent-purple);">${r.name} (${r.adapter_type})</span>`
         ).join(" ");
 
         const scriptsHtml = metadata.groovy_scripts.map(s => `<code>${s}</code>`).join(", ") || "None";
@@ -204,15 +196,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
                 <div>
                     <strong style="font-size: 0.8rem; color: var(--text-muted);">Receiver Systems to Mock:</strong>
-                    <div style="margin-top: 0.4rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">
-                        ${receiversHtml}
-                    </div>
+                    <div style="margin-top: 0.4rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">${receiversHtml}</div>
                 </div>
                 <div>
                     <strong style="font-size: 0.8rem; color: var(--text-muted);">Detected Groovy Scripts:</strong>
-                    <div style="margin-top: 0.3rem; font-size: 0.8rem;">
-                        ${scriptsHtml}
-                    </div>
+                    <div style="margin-top: 0.3rem; font-size: 0.8rem;">${scriptsHtml}</div>
                 </div>
             </div>
         `;
@@ -221,18 +209,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- SAP Tenant Modal Connection Handler ---
     btnConnectTenant.addEventListener("click", () => {
         tenantModal.classList.add("active");
-        setTimeout(() => {
-            if (serviceKeyJson) {
-                serviceKeyJson.focus();
-                serviceKeyJson.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        }, 150);
+        setTimeout(() => { if (serviceKeyJson) serviceKeyJson.focus(); }, 150);
     });
 
     btnSubmitTenant.addEventListener("click", async () => {
         const rawJson = serviceKeyJson ? serviceKeyJson.value.trim() : "";
-        const rawCurl = rawCurlInput ? rawCurlInput.value.trim() : "";
-        
         let tenantUrl = document.getElementById("cpiHost") ? document.getElementById("cpiHost").value.trim() : "";
         let clientId = document.getElementById("clientId") ? document.getElementById("clientId").value.trim() : "";
         let clientSecret = document.getElementById("clientSecret") ? document.getElementById("clientSecret").value.trim() : "";
@@ -240,7 +221,6 @@ document.addEventListener("DOMContentLoaded", () => {
         let iflowName = document.getElementById("iflowName") ? document.getElementById("iflowName").value.trim() : "Horizon";
         let version = document.getElementById("iflowVersion") ? document.getElementById("iflowVersion").value.trim() : "active";
 
-        // Auto-extract if JSON provided
         if (rawJson) {
             try {
                 const parsed = JSON.parse(rawJson);
@@ -249,13 +229,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (ext.clientId) clientId = ext.clientId;
                 if (ext.clientSecret) clientSecret = ext.clientSecret;
                 if (ext.tokenUrl) tokenUrl = ext.tokenUrl;
-            } catch (e) {
-                // Not JSON
-            }
+            } catch (e) {}
         }
 
         connectedHostUrl = tenantUrl;
-
         btnSubmitTenant.innerText = "Connecting to SAP Tenant...";
         btnSubmitTenant.disabled = true;
 
@@ -263,18 +240,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/v1/cpi/connect", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    tenant_url: tenantUrl,
-                    client_id: clientId,
-                    client_secret: clientSecret,
-                    token_url: tokenUrl,
-                    iflow_name: iflowName,
-                    version: version,
-                    raw_curl: rawCurl
-                })
+                body: JSON.stringify({ tenant_url: tenantUrl, client_id: clientId, client_secret: clientSecret, token_url: tokenUrl, iflow_name: iflowName, version: version })
             });
             const data = await res.json();
-            
             if (res.ok && data.status !== "ERROR") {
                 tenantModal.classList.remove("active");
                 showIFlowPickerModal(data.iflows || [], true);
@@ -290,19 +258,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     function showIFlowPickerModal(iflows, isLive) {
-        if (!iflows.length) {
-            alert("No iFlows found on tenant.");
-            return;
-        }
-
-        const headerTitle = isLive ? "🟢 Connected Live Tenant - Select iFlow" : "📦 Demo Mode - Select Sample iFlow";
-        document.querySelector("#iflowPickerModal h3").innerText = headerTitle;
+        if (!iflows.length) { alert("No iFlows found on tenant."); return; }
+        document.querySelector("#iflowPickerModal h3").innerText = isLive ? "🟢 Connected Live Tenant - Select iFlow" : "📦 Demo Mode - Select Sample iFlow";
 
         iflowPickerList.innerHTML = iflows.map(item => `
             <div class="test-item" style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;" data-id="${item.id}">
                 <div>
                     <strong style="color: #fff; font-size: 0.9rem;">${item.name}</strong>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">ID: <code>${item.id}</code> | Version: ${item.version || 'active'} | Package: ${item.package_id || 'Default'}</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">ID: <code>${item.id}</code> | Version: ${item.version || 'active'}</div>
                 </div>
                 <button class="btn btn-sm btn-primary select-iflow-btn" data-id="${item.id}">Select iFlow & Generate Tests</button>
             </div>
@@ -332,25 +295,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- AI Test Suite Generation Logic ---
     btnGenerateTests.addEventListener("click", async () => {
-        if (!currentIFlow) {
-            alert("Please load an iFlow package first in Step 1!");
-            switchTab("tab-import");
-            return;
-        }
+        if (!currentIFlow) { alert("Please load an iFlow package first in Step 1!"); switchTab("tab-import"); return; }
         await generateTestSuiteInternal(currentIFlow);
     });
 
     async function generateTestSuiteInternal(iflowMeta) {
         btnGenerateTests.disabled = true;
         btnGenerateTests.innerHTML = "<span>✨</span> Synthesizing Test Cases...";
-
         try {
             const res = await fetch("/api/v1/testsuite/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ iflow_metadata: iflowMeta, num_cases_per_category: 1 })
             });
-
             if (res.ok) {
                 const data = await res.json();
                 currentTestCases = data.test_cases;
@@ -365,7 +322,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // --- Render Test Case List & Details ---
     function renderTestCaseList(cases) {
         document.getElementById("testCaseCount").innerText = `${cases.length} Cases`;
         const listEl = document.getElementById("testCaseList");
@@ -387,14 +343,11 @@ document.addEventListener("DOMContentLoaded", () => {
             item.addEventListener("click", () => {
                 document.querySelectorAll(".test-item").forEach(i => i.classList.remove("selected"));
                 item.classList.add("selected");
-                const idx = parseInt(item.getAttribute("data-idx"));
-                selectTestCase(cases[idx]);
+                selectTestCase(cases[parseInt(item.getAttribute("data-idx"))]);
             });
         });
 
-        if (cases.length) {
-            selectTestCase(cases[0]);
-        }
+        if (cases.length) selectTestCase(cases[0]);
     }
 
     function selectTestCase(tc) {
@@ -414,60 +367,18 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
     }
 
-    // --- Render Mock Routes ---
     function renderMockRoutes(cases) {
         const routesList = document.getElementById("mockRoutesList");
         let allRules = [];
-        cases.forEach(c => {
-            if (c.mock_rules) allRules.push(...c.mock_rules);
-        });
-
-        if (!allRules.length) {
-            routesList.innerHTML = `<p class="text-muted">No mock rules active.</p>`;
-            return;
-        }
+        cases.forEach(c => { if (c.mock_rules) allRules.push(...c.mock_rules); });
+        if (!allRules.length) { routesList.innerHTML = `<p class="text-muted">No mock rules active.</p>`; return; }
 
         routesList.innerHTML = allRules.map(r => `
             <div style="padding: 0.6rem 0.8rem; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 0.5rem; border: 1px solid var(--border-color);">
                 <strong style="color: var(--accent-purple); font-size: 0.85rem;">/mock/${r.receiver_name}</strong>
-                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
-                    Returns HTTP ${r.response_status}
-                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">Returns HTTP ${r.response_status}</div>
             </div>
         `).join("");
-    }
-
-    // --- Section 4 Runtime Credentials Toggle Handler ---
-    const runtimeAuthType = document.getElementById("runtimeAuthType");
-    const runtimeAuthFields = document.getElementById("runtimeAuthFields");
-
-    if (runtimeAuthType && runtimeAuthFields) {
-        runtimeAuthType.addEventListener("change", () => {
-            const val = runtimeAuthType.value;
-            if (val === "default") {
-                runtimeAuthFields.style.display = "none";
-                runtimeAuthFields.innerHTML = "";
-            } else if (val === "it_rt_json") {
-                runtimeAuthFields.style.display = "block";
-                runtimeAuthFields.innerHTML = `
-                    <label style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block;">Paste Runtime (it-rt) Service Key JSON:</label>
-                    <textarea id="rtServiceKeyJson" class="code-editor" style="height: 90px; font-size: 0.75rem;" placeholder='{ "oauth": { "clientid": "sb-...", "clientsecret": "...", "tokenurl": "https://..." } }'></textarea>
-                `;
-            } else if (val === "basic") {
-                runtimeAuthFields.style.display = "block";
-                runtimeAuthFields.innerHTML = `
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <input type="text" id="rtUsername" style="background:#0d1117; color:#fff; border:1px solid var(--border-color); padding:0.4rem; font-size:0.8rem; border-radius:4px;" placeholder="Basic Auth Username">
-                        <input type="password" id="rtPassword" style="background:#0d1117; color:#fff; border:1px solid var(--border-color); padding:0.4rem; font-size:0.8rem; border-radius:4px;" placeholder="Password">
-                    </div>
-                `;
-            } else if (val === "token") {
-                runtimeAuthFields.style.display = "block";
-                runtimeAuthFields.innerHTML = `
-                    <input type="text" id="rtBearerToken" style="background:#0d1117; color:#fff; border:1px solid var(--border-color); padding:0.4rem; font-size:0.8rem; width:100%; border-radius:4px;" placeholder="Paste Bearer Token string (eyJ...)">
-                `;
-            }
-        });
     }
 
     // --- Execute Test Suite ---
@@ -480,39 +391,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const isSimMode = document.getElementById("execModeSim") && document.getElementById("execModeSim").checked;
         const endpointValue = targetCpiEndpoint ? targetCpiEndpoint.value.trim() : "";
+        const finalEndpoint = isSimMode ? "/mock/simulated_cpi_inbound" : (endpointValue || "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon");
 
-        const finalEndpoint = isSimMode ? "/mock/simulated_cpi_inbound" : (endpointValue || "https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon");
-
-        const authType = runtimeAuthType ? runtimeAuthType.value : "default";
         let reqPayload = {
             cpi_endpoint: finalEndpoint,
             test_cases: currentTestCases,
             enable_mpl_check: true,
-            runtime_auth_type: authType
+            runtime_auth_type: runtimeAuthType ? runtimeAuthType.value : "oauth2"
         };
 
-        if (authType === "it_rt_json") {
-            const rtJson = document.getElementById("rtServiceKeyJson") ? document.getElementById("rtServiceKeyJson").value.trim() : "";
-            if (rtJson) {
-                try {
-                    const parsed = JSON.parse(rtJson);
-                    const ext = extractServiceKeyFields(parsed);
-                    reqPayload.credentials = {
-                        client_id: ext.clientId,
-                        client_secret: ext.clientSecret,
-                        token_url: ext.tokenUrl,
-                        tenant_url: ext.hostUrl
-                    };
-                } catch (e) {
-                    alert("Invalid JSON in Runtime Service Key box");
-                    return;
-                }
+        const rtRaw = itRtServiceKeyJson ? itRtServiceKeyJson.value.trim() : "";
+        if (rtRaw) {
+            try {
+                const parsed = JSON.parse(rtRaw);
+                const ext = extractServiceKeyFields(parsed);
+                reqPayload.credentials = {
+                    client_id: ext.clientId,
+                    client_secret: ext.clientSecret,
+                    token_url: ext.tokenUrl,
+                    tenant_url: ext.hostUrl
+                };
+            } catch (e) {
+                alert("Invalid JSON in Runtime Service Key (it-rt) box.");
+                return;
             }
-        } else if (authType === "basic") {
-            reqPayload.runtime_username = document.getElementById("rtUsername") ? document.getElementById("rtUsername").value.trim() : "";
-            reqPayload.runtime_password = document.getElementById("rtPassword") ? document.getElementById("rtPassword").value.trim() : "";
-        } else if (authType === "token") {
-            reqPayload.runtime_token = document.getElementById("rtBearerToken") ? document.getElementById("rtBearerToken").value.trim() : "";
         }
 
         btnRunSuite.disabled = true;
@@ -565,7 +467,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }).join("");
     }
 
-    // --- Mock Refresh & Clear ---
     btnRefreshIntercepts.addEventListener("click", fetchInterceptedLogs);
     btnClearMocks.addEventListener("click", async () => {
         await fetch("/api/v1/mock/clear", { method: "POST" });
@@ -582,7 +483,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     container.innerHTML = `<div class="empty-state"><p>No outbound calls intercepted yet.</p></div>`;
                     return;
                 }
-
                 container.innerHTML = data.intercepts.map(i => `
                     <div style="font-family: var(--font-mono); font-size: 0.75rem; border-bottom: 1px solid var(--border-color); padding: 0.5rem 0;">
                         <span style="color: var(--accent-cyan);">[${i.method}]</span> 
@@ -591,12 +491,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>
                 `).join("");
             }
-        } catch (err) {
-            console.error("Fetch intercepts error", err);
-        }
+        } catch (err) {}
     }
 
-    // Export JUnit XML
     btnExportJUnit.addEventListener("click", () => {
         if (!lastReport || !lastReport.junit_xml) return;
         const blob = new Blob([lastReport.junit_xml], { type: "text/xml" });

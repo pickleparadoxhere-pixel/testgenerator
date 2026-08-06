@@ -29,7 +29,7 @@
                     <span>📦</span> Load Sample iFlow
                 </button>
                 <button class="btn btn-primary" id="btnConnectTenant">
-                    <span>🔑</span> Connect SAP Tenant
+                    <span>🔑</span> Connect Management Tenant (api)
                 </button>
             </div>
         </header>
@@ -182,39 +182,48 @@
                         </button>
                     </div>
 
-                    <!-- Prominent Target CPI Endpoint & Runtime Auth Box -->
-                    <div class="card p-3 mb-4" style="background: rgba(139, 92, 246, 0.12); border: 2px solid var(--accent-purple); box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);">
+                    <!-- Runtime Service Key (it-rt) Box -->
+                    <div class="card p-3 mb-4" style="background: rgba(139, 92, 246, 0.14); border: 2px solid var(--accent-purple); box-shadow: 0 4px 25px rgba(139, 92, 246, 0.25);">
                         <div class="flex-between mb-2">
-                            <h4 style="font-size: 1rem; color: #fff; font-weight: 700;">🎯 Target CPI Endpoint & Runtime Credentials</h4>
+                            <h4 style="font-size: 1rem; color: #fff; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>🔑</span> Integration Flow Runtime (it-rt) Service Key
+                            </h4>
                             <div style="display: flex; gap: 0.8rem; align-items: center;">
-                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); padding: 0.3rem 0.7rem; border-radius: 6px;">
+                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(239, 68, 68, 0.6); padding: 0.35rem 0.75rem; border-radius: 6px;">
                                     <input type="radio" name="execMode" value="live" id="execModeLive" checked> 🔴 Live SAP CPI Endpoint
                                 </label>
-                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); padding: 0.3rem 0.7rem; border-radius: 6px;">
+                                <label style="font-size: 0.82rem; color: #fff; font-weight: 600; cursor: pointer; background: rgba(16, 185, 129, 0.25); border: 1px solid rgba(16, 185, 129, 0.6); padding: 0.35rem 0.75rem; border-radius: 6px;">
                                     <input type="radio" name="execMode" value="simulation" id="execModeSim"> 🟢 Offline Simulation
                                 </label>
                             </div>
                         </div>
 
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.8rem;">Paste your <code>it-rt</code> Service Key JSON below. It auto-fills the complete runtime endpoint URL and authorizes HTTP POST requests with <code>ESBMessaging.send</code>!</p>
+                        
                         <div class="form-group mb-3">
-                            <label style="font-size: 0.8rem; color: var(--text-muted);">Target CPI Inbound Endpoint URL (HTTP POST target)</label>
-                            <input type="text" id="targetCpiEndpoint" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-cyan); background: #0d1117; border: 1px solid var(--border-color); padding: 0.6rem;" placeholder="https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon">
+                            <textarea id="itRtServiceKeyJson" class="code-editor" style="height: 100px; font-size: 0.78rem; border-color: var(--accent-purple);" placeholder='{
+    "oauth": {
+        "clientid": "sb-f74e9b18-7780-4b47-9b7d-43cf2fc6c548!b135881|it-rt-cpi-gtxsss73!b196",
+        "clientsecret": "8f326dd1-230c-4e5c-920b-edbcfe4e596a$BpcnZRkGL09HhzrRqwzMNLWunX4ENB8N7oC092_EcFY=",
+        "url": "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com",
+        "createdate": "2026-08-02T18:21:06.154Z",
+        "tokenurl": "https://cpi-gtxsss73.authentication.ap21.hana.ondemand.com/oauth/token"
+    }
+}'></textarea>
                         </div>
-
-                        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 0.8rem 0;" />
 
                         <div class="form-group mb-2">
-                            <label style="font-size: 0.8rem; color: #fff; font-weight: 600;">🔑 Runtime Endpoint Auth Mode (Requires ESBMessaging.send role):</label>
-                            <select id="runtimeAuthType" style="background: #0d1117; color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.6rem; font-size: 0.8rem; border-radius: 4px; width: 100%;">
-                                <option value="default">Use Active Session Token (api Plan Key)</option>
-                                <option value="it_rt_json">Paste Runtime (it-rt) Service Key JSON</option>
-                                <option value="basic">Basic Auth (Username / Password)</option>
-                                <option value="token">Custom Bearer Token</option>
-                            </select>
+                            <label style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Discovered Complete Target Endpoint URL:</label>
+                            <input type="text" id="targetCpiEndpoint" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-cyan); background: #0d1117; border: 1px solid var(--border-color); padding: 0.6rem;" placeholder="https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon">
                         </div>
 
-                        <div id="runtimeAuthFields" style="margin-top: 0.6rem; display: none;">
-                            <!-- Dynamic Auth Inputs -->
+                        <div class="form-group mb-1 mt-2">
+                            <label style="font-size: 0.8rem; color: var(--text-muted);">Auth Header Method:</label>
+                            <select id="runtimeAuthType" style="background: #0d1117; color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.6rem; font-size: 0.8rem; border-radius: 4px;">
+                                <option value="oauth2">OAuth 2.0 Client Credentials (tokenurl)</option>
+                                <option value="basic">Basic Authentication (clientid:clientsecret)</option>
+                                <option value="default">Use Management Session Token</option>
+                            </select>
                         </div>
                     </div>
 
@@ -276,16 +285,16 @@
     <div class="modal-overlay" id="tenantModal">
         <div class="modal-card" style="width: 620px; max-width: 95vw;">
             <div class="modal-header">
-                <h3>Connect SAP CPI Tenant</h3>
+                <h3>Connect SAP CPI Management Tenant (api)</h3>
                 <button class="close-btn" onclick="document.getElementById('tenantModal').classList.remove('active')">&times;</button>
             </div>
             <div class="modal-body" style="max-height: 80vh; overflow-y: auto; padding: 1.5rem;">
                 <!-- Option A: Paste BTP Service Key JSON -->
                 <div class="card p-3 mb-3" style="background: rgba(139, 92, 246, 0.12); border: 2px solid var(--accent-purple); box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);">
                     <h4 style="font-size: 0.95rem; color: #fff; font-weight: 700; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.4rem;">
-                        <span>📋</span> Option A: Paste BTP Service Key JSON
+                        <span>📋</span> Option A: Paste BTP Management Service Key JSON (api)
                     </h4>
-                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.8rem;">Paste your complete BTP Service Key JSON (with <code>oauth</code> object). All fields below auto-fill instantly!</p>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.8rem;">Paste your BTP Management Service Key JSON (with <code>oauth</code> object) to list and download iFlows.</p>
                     <textarea id="serviceKeyJson" class="code-editor" style="height: 120px; font-size: 0.78rem; border-color: var(--accent-purple);" placeholder='{
   "oauth": {
     "createdate": "2026-08-02T18:20:18.318Z",
@@ -330,12 +339,6 @@
                         <label style="font-size: 0.8rem;">Version</label>
                         <input type="text" id="iflowVersion" value="active" placeholder="active">
                     </div>
-                </div>
-
-                <!-- Option C: Paste Postman cURL -->
-                <div class="form-group mt-3">
-                    <label style="font-size: 0.8rem;">Option C: Paste Postman cURL (Optional)</label>
-                    <textarea id="rawCurlInput" class="code-editor" style="height: 60px; font-size: 0.72rem;" placeholder="curl --location 'https://...' --user 'client_id:secret'"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
