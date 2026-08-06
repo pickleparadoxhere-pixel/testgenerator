@@ -43,16 +43,12 @@
                     <span class="tab-label">1. iFlow & Schema</span>
                 </button>
                 <button class="nav-tab" data-tab="tab-test-studio">
-                    <span class="tab-icon">🤖</span>
-                    <span class="tab-label">2. AI Test Studio</span>
+                    <span class="tab-icon">⚡</span>
+                    <span class="tab-label">2. Test Studio & Runner</span>
                 </button>
                 <button class="nav-tab" data-tab="tab-mock-server">
                     <span class="tab-icon">🛠️</span>
-                    <span class="tab-label">3. Mock Server</span>
-                </button>
-                <button class="nav-tab" data-tab="tab-execution">
-                    <span class="tab-icon">⚡</span>
-                    <span class="tab-label">4. Test Runner</span>
+                    <span class="tab-label">3. Receiver Mocks</span>
                 </button>
             </nav>
 
@@ -91,33 +87,70 @@
                     </div>
                 </div>
 
-                <!-- TAB 2: AI Test Studio -->
+                <!-- TAB 2: Combined AI Test Studio & Execution Runner -->
                 <div class="tab-content" id="tab-test-studio">
                     <div class="section-header flex-between">
                         <div>
-                            <h2>AI Test Suite Synthesis</h2>
-                            <p>Generate Happy Path, Boundary Edge Cases, and Negative test scenarios using Google Gemini AI.</p>
+                            <h2>AI Test Studio & Execution Runner</h2>
+                            <p>Synthesize AI scenarios, edit payloads, run individual test cases, or trigger full suite runs.</p>
                         </div>
-                        <button class="btn btn-accent" id="btnGenerateTests">
-                            <span>✨</span> Generate AI Test Cases
-                        </button>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <!-- Live / Simulation Segmented Toggle -->
+                            <div class="toggle-group" id="execModeToggleGroup">
+                                <button type="button" class="toggle-btn active" id="toggleLive">🔴 Live CPI</button>
+                                <button type="button" class="toggle-btn" id="toggleSim">🟢 Offline Sim</button>
+                            </div>
+                            <button class="btn btn-accent" id="btnGenerateTests">
+                                <span>✨</span> Generate AI Tests
+                            </button>
+                            <button class="btn btn-primary" id="btnRunSuite">
+                                <span>⚡</span> Execute Full Suite
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Config Bar -->
+                    <div class="card mb-3" style="border-color: rgba(99, 102, 241, 0.3); background: rgba(99, 102, 241, 0.03);">
+                        <div class="card-body" style="padding: 0.75rem 1rem;">
+                            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 300px;">
+                                    <label style="margin: 0; font-size: 0.78rem; font-weight: 600; white-space: nowrap; color: var(--text-secondary);">Target Endpoint:</label>
+                                    <input type="text" id="targetCpiEndpoint" value="https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon" style="flex: 1; font-size: 0.8rem; padding: 0.35rem 0.6rem;">
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <label style="margin: 0; font-size: 0.78rem; font-weight: 600; white-space: nowrap; color: var(--text-secondary);">Auth Mode:</label>
+                                    <select id="runtimeAuthType" style="padding: 0.35rem 0.5rem; background: var(--bg-inset); color: #fff; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.78rem;">
+                                        <option value="oauth2">OAuth 2.0 Client Credentials (it-rt)</option>
+                                        <option value="basic">Basic Auth (clientid:clientsecret)</option>
+                                    </select>
+                                </div>
+                                <button class="btn btn-sm btn-secondary" id="btnToggleCredsBox">
+                                    <span>🔑</span> Runtime Key (it-rt)
+                                </button>
+                            </div>
+                            
+                            <!-- Collapsible Service Key JSON Box -->
+                            <div id="credsExpandBox" style="margin-top: 0.6rem; display: block;">
+                                <textarea id="itRtServiceKeyJson" class="code-editor" style="height: 75px; font-size: 0.76rem; border-color: rgba(99, 102, 241, 0.25);" placeholder='Paste it-rt Runtime Service Key JSON here...'></textarea>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="test-suite-layout">
-                        <!-- Test Cases List -->
+                        <!-- Test Cases List with Individual Run Button -->
                         <div class="card test-list-card">
-                            <div class="card-header">
+                            <div class="card-header flex-between">
                                 <h3>Synthesized Test Cases</h3>
                                 <span class="badge count-badge" id="testCaseCount">0 Cases</span>
                             </div>
                             <div class="test-case-list" id="testCaseList">
                                 <div class="empty-state">
-                                    <p>Click "Generate AI Test Cases" to synthesize scenarios for the active iFlow.</p>
+                                    <p>Click "Generate AI Tests" to synthesize scenarios for the active iFlow.</p>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Selected Test Case Detail & Code Editor -->
+                        <!-- Selected Test Case Detail & Editor -->
                         <div class="card test-detail-card">
                             <div class="card-header flex-between">
                                 <h3 id="selectedTestName">Select a Test Case</h3>
@@ -125,7 +158,7 @@
                             </div>
                             <div class="test-detail-body" id="testDetailBody">
                                 <div class="empty-state">
-                                    <p>Select a test case from the list to view and edit payload details.</p>
+                                    <p>Select a test case from the list to view, edit payload details, and run live tests.</p>
                                 </div>
                             </div>
                         </div>
@@ -166,117 +199,6 @@
                                     <p>No outbound calls intercepted yet. Execute a test run to view live CPI receiver requests.</p>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- TAB 4: Test Execution & Live Logs -->
-                <div class="tab-content" id="tab-execution">
-                    <div class="section-header flex-between">
-                        <div>
-                            <h2>Test Suite Execution & Assertion Engine</h2>
-                            <p>Run test scenarios against SAP CPI endpoints and verify Message Processing Logs (MPL).</p>
-                        </div>
-                        <button class="btn btn-primary" id="btnRunSuite">
-                            <span>⚡</span> Execute Full Test Suite
-                        </button>
-                    </div>
-
-                    <!-- Runtime Inbound Credentials Box (it-rt) -->
-                    <div class="card mb-4" style="border-color: rgba(99, 102, 241, 0.35); background: rgba(99, 102, 241, 0.04);">
-                        <div class="card-header flex-between" style="background: rgba(99, 102, 241, 0.08);">
-                            <h3 style="color: #fff; font-size: 0.88rem; display: flex; align-items: center; gap: 0.4rem;">
-                                <span>🔑</span> Runtime Inbound Credentials (it-rt Service Key JSON)
-                            </h3>
-                            <span class="badge" style="color: #818cf8; background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.3);">Required for Live CPI Execution</span>
-                        </div>
-                        <div class="card-body" style="padding: 1rem;">
-                            <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.6rem;">Paste your <code>it-rt</code> Runtime Service Key JSON (with <code>ESBMessaging.send</code> scope). The tool extracts client ID, secret, token URL, and runtime host automatically.</p>
-                            <textarea id="itRtServiceKeyJson" class="code-editor" style="height: 90px; font-size: 0.78rem; border-color: rgba(99, 102, 241, 0.25);" placeholder='{
-  "oauth": {
-    "clientid": "sb-f74e9b18...!it-rt-...",
-    "clientsecret": "8f326dd1...",
-    "tokenurl": "https://...authentication.ap21.hana.ondemand.com/oauth/token",
-    "url": "https://...it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com"
-  }
-}'></textarea>
-                        </div>
-                    </div>
-
-                    <!-- Config Toolbar -->
-                    <div class="card mb-4">
-                        <div class="card-body flex-between" style="padding: 0.85rem 1.25rem;">
-                            <div class="form-group flex-between" style="flex-direction: row; gap: 1.5rem; align-items: center; width: 100%;">
-                                <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1;">
-                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; white-space: nowrap;">Target Endpoint:</label>
-                                    <input type="text" id="targetCpiEndpoint" value="https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon" style="flex: 1;">
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; white-space: nowrap;">Auth Mode:</label>
-                                    <select id="runtimeAuthType" style="padding: 0.4rem 0.6rem; background: var(--bg-inset); color: #fff; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.8rem;">
-                                        <option value="oauth2">OAuth 2.0 Client Credentials (it-rt)</option>
-                                        <option value="basic">Basic Auth (clientid:clientsecret)</option>
-                                    </select>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 1rem;">
-                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
-                                        <input type="radio" name="execMode" value="live" id="execModeLive" checked> 🔴 Live CPI Endpoint
-                                    </label>
-                                    <label style="margin: 0; font-size: 0.8rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
-                                        <input type="radio" name="execMode" value="simulation" id="execModeSim"> 🟢 Offline Simulation
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Summary Stats Bar -->
-                    <div class="stats-grid mb-4">
-                        <div class="stat-card">
-                            <div class="stat-value" id="statTotal">0</div>
-                            <div class="stat-label">Total Executed</div>
-                        </div>
-                        <div class="stat-card stat-pass">
-                            <div class="stat-value" id="statPassed">0</div>
-                            <div class="stat-label">Passed</div>
-                        </div>
-                        <div class="stat-card stat-fail">
-                            <div class="stat-value" id="statFailed">0</div>
-                            <div class="stat-label">Failed</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value" id="statDuration">0 ms</div>
-                            <div class="stat-label">Total Duration</div>
-                        </div>
-                    </div>
-
-                    <!-- Results Table -->
-                    <div class="card">
-                        <div class="card-header flex-between">
-                            <h3>Test Suite Execution Results</h3>
-                            <button class="btn btn-sm btn-secondary" id="btnExportJUnit" style="display: none;">
-                                <span>📄</span> Export JUnit XML
-                            </button>
-                        </div>
-                        <div class="card-body" style="padding: 0;">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Status</th>
-                                        <th>Test ID</th>
-                                        <th>Scenario Name</th>
-                                        <th>Category</th>
-                                        <th>Latency</th>
-                                        <th>SAP MPL ID</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="resultsTableBody">
-                                    <tr>
-                                        <td colspan="7" class="empty-state">No test suite runs executed yet. Click "Execute Full Test Suite" to start.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                 </div>
