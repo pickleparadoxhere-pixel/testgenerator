@@ -194,6 +194,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- SAP Tenant Modal Connection Handler ---
     btnConnectTenant.addEventListener("click", () => {
         tenantModal.classList.add("active");
+        setTimeout(() => {
+            if (serviceKeyJson) {
+                serviceKeyJson.focus();
+                serviceKeyJson.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 150);
     });
 
     btnSubmitTenant.addEventListener("click", async () => {

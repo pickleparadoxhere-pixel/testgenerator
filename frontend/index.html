@@ -238,18 +238,21 @@
 
     <!-- SAP CPI Tenant Connection Modal -->
     <div class="modal-overlay" id="tenantModal">
-        <div class="modal-card" style="width: 580px;">
+        <div class="modal-card" style="width: 620px; max-width: 95vw;">
             <div class="modal-header">
                 <h3>Connect SAP CPI Tenant</h3>
                 <button class="close-btn" onclick="document.getElementById('tenantModal').classList.remove('active')">&times;</button>
             </div>
-            <div class="modal-body" style="max-height: 480px; overflow-y: auto;">
+            <div class="modal-body" style="max-height: 80vh; overflow-y: auto; padding: 1.5rem;">
                 <!-- Option A: Paste BTP Service Key JSON -->
-                <div class="card p-3 mb-3" style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3);">
-                    <h4 style="font-size: 0.9rem; color: var(--accent-purple); font-weight: 700; margin-bottom: 0.3rem;">📋 Option A: Paste BTP Service Key JSON</h4>
-                    <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.6rem;">Paste your complete BTP Service Key JSON (with <code>oauth</code> object). Fields below auto-fill instantly!</p>
-                    <textarea id="serviceKeyJson" class="code-editor" style="height: 100px; font-size: 0.75rem;" placeholder='{
+                <div class="card p-3 mb-3" style="background: rgba(139, 92, 246, 0.12); border: 2px solid var(--accent-purple); box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);">
+                    <h4 style="font-size: 0.95rem; color: #fff; font-weight: 700; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.4rem;">
+                        <span>📋</span> Option A: Paste BTP Service Key JSON
+                    </h4>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.8rem;">Paste your complete BTP Service Key JSON (with <code>oauth</code> object). All fields below auto-fill instantly!</p>
+                    <textarea id="serviceKeyJson" class="code-editor" style="height: 120px; font-size: 0.78rem; border-color: var(--accent-purple);" placeholder='{
   "oauth": {
+    "createdate": "2026-08-02T18:20:18.318Z",
     "clientid": "sb-...",
     "clientsecret": "...",
     "tokenurl": "https://.../oauth/token",
@@ -258,7 +261,7 @@
 }'></textarea>
                 </div>
 
-                <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 0.8rem 0; font-weight: 600;">— OR FILL MANUAL FIELDS —</div>
+                <div style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 1rem 0; font-weight: 600;">— OR FILL MANUAL FIELDS BELOW —</div>
 
                 <!-- Option B: Manual Input Fields -->
                 <div class="form-group mb-2">
