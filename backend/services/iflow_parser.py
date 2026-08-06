@@ -25,7 +25,7 @@ class IFlowParser:
                 
                 groovy_scripts = [p for p in file_list if p.endswith(".groovy")]
                 xslt_mappings = [p for p in file_list if p.endswith(".xsl") or p.endswith(".xslt")]
-                schema_files = [p for p in file_list if p.endswith(".xsd") or p.endswith(".wsdl") or p.endswith(".edmx") or p.endswith(".json")]
+                schema_files = [p for p in file_list if p.endswith(".xsd") or p.endswith(".wsdl") or p.endswith(".edmx") or p.endswith(".json") or p.endswith(".mmap") or p.endswith(".xsl") or p.endswith(".xslt")]
 
                 # Default fallback values
                 iflow_id = filename.replace(".zip", "")
