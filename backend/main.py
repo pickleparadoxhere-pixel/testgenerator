@@ -1,5 +1,8 @@
 import os
 import logging
+import json
+import base64
+import subprocess
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, Response, FileResponse
@@ -55,67 +58,127 @@ async def parse_iflow(file: UploadFile = File(...)):
     metadata = parser.parse_zip(contents, file.filename)
     return metadata
 
-# 2. Fetch iFlows directly from SAP CPI OData API using Credentials
+# Helper for executing shell cURL
+def execute_shell_curl(curl_str: str) -> tuple[dict, str]:
+    cleaned = curl_str.strip().replace("\\\n", " ").replace("\n", " ")
+    res = subprocess.run(cleaned, shell=True, capture_output=True, text=True, timeout=25)
+    stdout = res.stdout.strip()
+    json_str = stdout
+    if "\r\n\r\n" in stdout:
+        json_str = stdout.split("\r\n\r\n")[-1]
+    elif "\n\n" in stdout:
+        json_str = stdout.split("\n\n")[-1]
+    try:
+        data = json.loads(json_str)
+        return data, stdout
+    except Exception:
+        return None, stdout
+
+# 2. Fetch iFlows directly from SAP CPI OData API using Credentials or Service Key JSON
 @app.post("/api/v1/cpi/connect")
-async def connect_and_fetch_iflows(creds: CPICredentials):
+async def connect_and_fetch_iflows(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    raw_curl = body.get("raw_curl", "").strip()
+    if raw_curl:
+        try:
+            res_json, raw_out = execute_shell_curl(raw_curl)
+            if res_json and "d" in res_json:
+                item = res_json.get("d", {})
+                iflow_id = item.get("Id", "Horizon")
+                return {
+                    "status": "LIVE_SUCCESS",
+                    "message": f"Successfully fetched iFlow '{iflow_id}' via cURL!",
+                    "iflows": [{
+                        "id": iflow_id,
+                        "name": item.get("Name") or iflow_id,
+                        "version": item.get("Version", "active"),
+                        "package_id": item.get("PackageId", "DefaultPackage")
+                    }]
+                }
+            else:
+                return JSONResponse(status_code=400, content={"status": "ERROR", "error": f"cURL Output:\n\n{raw_out[:600]}"})
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"status": "ERROR", "error": str(e)})
+
+    # Unwrap BTP Service Key JSON
+    if "oauth" in body and isinstance(body["oauth"], dict):
+        oauth = body["oauth"]
+        tenant_url = oauth.get("url") or body.get("tenant_url")
+        client_id = oauth.get("clientid") or oauth.get("client_id") or body.get("client_id")
+        client_secret = oauth.get("clientsecret") or oauth.get("client_secret") or body.get("client_secret")
+        token_url = oauth.get("tokenurl") or oauth.get("token_url") or body.get("token_url")
+    else:
+        tenant_url = body.get("tenant_url") or body.get("url")
+        client_id = body.get("client_id") or body.get("clientid")
+        client_secret = body.get("client_secret") or body.get("clientsecret")
+        token_url = body.get("token_url") or body.get("tokenurl")
+
+    iflow_name = body.get("iflow_name") or "Horizon"
+    version = body.get("version") or "active"
+
+    if not tenant_url or not client_id or not client_secret:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "error": "Please provide BTP Service Key JSON or Host URL, Client ID, and Client Secret."})
+
+    tenant_clean = tenant_url.rstrip("/")
+    if not token_url:
+        subdomain = tenant_clean.split("//")[-1].split(".")[0]
+        token_url = f"https://{subdomain}.authentication.ap21.hana.ondemand.com/oauth/token"
+
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            # 1. Get OAuth Token
             token_resp = await client.post(
-                creds.token_url,
+                token_url,
                 data={"grant_type": "client_credentials"},
-                auth=(creds.client_id, creds.client_secret)
+                auth=(client_id, client_secret)
             )
             if token_resp.status_code != 200:
-                raise HTTPException(
-                    status_code=401,
-                    detail=f"SAP BTP OAuth Authentication Failed (HTTP {token_resp.status_code}): {token_resp.text}"
-                )
-            
+                return JSONResponse(status_code=401, content={"status": "ERROR", "error": f"BTP OAuth Authentication Failed (HTTP {token_resp.status_code}): {token_resp.text}"})
+
             token = token_resp.json().get("access_token")
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
-            # 2. Fetch Designtime Artifacts
-            artifacts_url = f"{creds.tenant_url.rstrip('/')}/api/v1/IntegrationDesigntimeArtifacts"
-            art_resp = await client.get(artifacts_url, headers=headers)
-            
+            odata_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_name}',Version='{version}')"
+            art_resp = await client.get(odata_url, headers=headers)
+
             if art_resp.status_code == 200:
-                artifacts_data = art_resp.json().get("d", {}).get("results", [])
-                iflows = [
-                    {
+                data = art_resp.json().get("d", {})
+                iflow_id = data.get("Id", iflow_name)
+                return {
+                    "status": "LIVE_SUCCESS",
+                    "message": f"Successfully authenticated via OAuth! Fetched iFlow '{iflow_id}'.",
+                    "iflows": [{
+                        "id": iflow_id,
+                        "name": data.get("Name") or iflow_id,
+                        "version": data.get("Version", version),
+                        "package_id": data.get("PackageId", "DefaultPackage")
+                    }]
+                }
+            else:
+                # Try fetching all artifacts if specific iFlow single query fails
+                list_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts"
+                list_resp = await client.get(list_url, headers=headers)
+                if list_resp.status_code == 200:
+                    results = list_resp.json().get("d", {}).get("results", [])
+                    iflows = [{
                         "id": item.get("Id"),
                         "name": item.get("Name"),
                         "version": item.get("Version"),
                         "package_id": item.get("PackageId")
-                    }
-                    for item in artifacts_data
-                ]
-                return {"status": "SUCCESS", "count": len(iflows), "iflows": iflows}
-            else:
-                raise HTTPException(
-                    status_code=art_resp.status_code,
-                    detail=f"Could not fetch CPI Designtime Artifacts: {art_resp.text}"
-                )
-
-    except HTTPException:
-        raise
+                    } for item in results]
+                    return {"status": "LIVE_SUCCESS", "count": len(iflows), "iflows": iflows}
+                else:
+                    return JSONResponse(status_code=art_resp.status_code, content={"status": "ERROR", "error": f"Could not fetch CPI iFlow: {art_resp.text}"})
     except Exception as e:
         logger.error(f"Error connecting to SAP CPI: {e}")
-        # Provide demo mode response if live tenant connection fails
-        return {
-            "status": "DEMO_MODE",
-            "message": f"Could not establish live connection ({str(e)}). Returning available demo iFlow packages.",
-            "iflows": [
-                {"id": "SalesOrder_S4HANA_Creation", "name": "Sales Order Creation in S/4HANA", "version": "1.0.1", "package_id": "OrderManagement"},
-                {"id": "Invoice_EDIFACT_To_OData", "name": "B2B EDIFACT Invoice to OData", "version": "2.0.0", "package_id": "Financials"},
-                {"id": "Customer_Sync_Salesforce", "name": "Customer Master Sync to Salesforce", "version": "1.2.0", "package_id": "CRM_Integration"}
-            ]
-        }
+        return JSONResponse(status_code=400, content={"status": "ERROR", "error": f"Connection error: {str(e)}"})
 
 # 3. Download selected iFlow bundle from SAP CPI OData API
 @app.get("/api/v1/cpi/fetch-iflow/{iflow_id}")
 async def fetch_iflow_bundle(iflow_id: str):
-    # Generates/returns parsed metadata for the selected iFlow
     sample_zip = create_sample_iflow_zip()
     metadata = parser.parse_zip(sample_zip, f"{iflow_id}.zip")
     metadata.id = iflow_id
@@ -184,5 +247,5 @@ if os.path.exists(frontend_dir):
 def read_root():
     index_path = os.path.join(frontend_dir, "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
     return {"message": "SAP CPI AI Test & Mock Agent Backend Running"}
