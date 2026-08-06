@@ -5,6 +5,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import ssl
+import base64
 from typing import List, Dict, Any, Optional
 from backend.models.schema import TestCase, TestResult, TestExecutionRequest, CPICredentials, TestSuiteReport
 from backend.services.mock_server import mock_manager
@@ -24,19 +25,28 @@ class CPITestRunner:
         passed_count = 0
         failed_count = 0
 
-        # Access token for SAP CPI API if OAuth provided or active in session
-        access_token = self.default_bearer_token
-        if self.request.credentials:
+        # Resolve auth headers based on specified runtime credentials mode
+        auth_header_val = None
+        if self.request.runtime_auth_type == "basic" and self.request.runtime_username:
+            u_pass = f"{self.request.runtime_username}:{self.request.runtime_password or ''}"
+            encoded = base64.b64encode(u_pass.encode()).decode()
+            auth_header_val = f"Basic {encoded}"
+        elif self.request.runtime_auth_type == "token" and self.request.runtime_token:
+            auth_header_val = f"Bearer {self.request.runtime_token.strip()}"
+        elif self.request.credentials and self.request.credentials.client_id:
             fetched_token = self._fetch_oauth_token(self.request.credentials)
             if fetched_token:
-                access_token = fetched_token
+                auth_header_val = f"Bearer {fetched_token}"
+
+        if not auth_header_val and self.default_bearer_token:
+            auth_header_val = f"Bearer {self.default_bearer_token}"
 
         for test_case in self.request.test_cases:
             # Register test-specific mock rules
             for rule in test_case.mock_rules:
                 mock_manager.register_rule(rule)
 
-            result = self._execute_single_case(test_case, access_token)
+            result = self._execute_single_case(test_case, auth_header_val)
             results.append(result)
             if result.status == "PASS":
                 passed_count += 1
@@ -58,7 +68,7 @@ class CPITestRunner:
             junit_xml=junit_xml
         )
 
-    def _execute_single_case(self, test_case: TestCase, access_token: Optional[str]) -> TestResult:
+    def _execute_single_case(self, test_case: TestCase, auth_header_val: Optional[str]) -> TestResult:
         start_time = time.time()
         cpi_endpoint = self.request.cpi_endpoint
         
@@ -68,8 +78,8 @@ class CPITestRunner:
         else:
             headers["Content-Type"] = "application/xml"
 
-        if access_token:
-            headers["Authorization"] = f"Bearer {access_token}"
+        if auth_header_val:
+            headers["Authorization"] = auth_header_val
 
         actual_status = test_case.expected_status
         actual_response = ""
@@ -169,7 +179,6 @@ class CPITestRunner:
         try:
             data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("utf-8")
             req = urllib.request.Request(creds.token_url, data=data, method="POST")
-            import base64
             auth_str = base64.b64encode(f"{creds.client_id}:{creds.client_secret}".encode()).decode()
             req.add_header("Authorization", f"Basic {auth_str}")
             req.add_header("Content-Type", "application/x-www-form-urlencoded")

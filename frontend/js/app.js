@@ -437,6 +437,39 @@ document.addEventListener("DOMContentLoaded", () => {
         `).join("");
     }
 
+    // --- Section 4 Runtime Credentials Toggle Handler ---
+    const runtimeAuthType = document.getElementById("runtimeAuthType");
+    const runtimeAuthFields = document.getElementById("runtimeAuthFields");
+
+    if (runtimeAuthType && runtimeAuthFields) {
+        runtimeAuthType.addEventListener("change", () => {
+            const val = runtimeAuthType.value;
+            if (val === "default") {
+                runtimeAuthFields.style.display = "none";
+                runtimeAuthFields.innerHTML = "";
+            } else if (val === "it_rt_json") {
+                runtimeAuthFields.style.display = "block";
+                runtimeAuthFields.innerHTML = `
+                    <label style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block;">Paste Runtime (it-rt) Service Key JSON:</label>
+                    <textarea id="rtServiceKeyJson" class="code-editor" style="height: 90px; font-size: 0.75rem;" placeholder='{ "oauth": { "clientid": "sb-...", "clientsecret": "...", "tokenurl": "https://..." } }'></textarea>
+                `;
+            } else if (val === "basic") {
+                runtimeAuthFields.style.display = "block";
+                runtimeAuthFields.innerHTML = `
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <input type="text" id="rtUsername" style="background:#0d1117; color:#fff; border:1px solid var(--border-color); padding:0.4rem; font-size:0.8rem; border-radius:4px;" placeholder="Basic Auth Username">
+                        <input type="password" id="rtPassword" style="background:#0d1117; color:#fff; border:1px solid var(--border-color); padding:0.4rem; font-size:0.8rem; border-radius:4px;" placeholder="Password">
+                    </div>
+                `;
+            } else if (val === "token") {
+                runtimeAuthFields.style.display = "block";
+                runtimeAuthFields.innerHTML = `
+                    <input type="text" id="rtBearerToken" style="background:#0d1117; color:#fff; border:1px solid var(--border-color); padding:0.4rem; font-size:0.8rem; width:100%; border-radius:4px;" placeholder="Paste Bearer Token string (eyJ...)">
+                `;
+            }
+        });
+    }
+
     // --- Execute Test Suite ---
     btnRunSuite.addEventListener("click", async () => {
         if (!currentTestCases.length) {
@@ -450,6 +483,38 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const finalEndpoint = isSimMode ? "/mock/simulated_cpi_inbound" : (endpointValue || "https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon");
 
+        const authType = runtimeAuthType ? runtimeAuthType.value : "default";
+        let reqPayload = {
+            cpi_endpoint: finalEndpoint,
+            test_cases: currentTestCases,
+            enable_mpl_check: true,
+            runtime_auth_type: authType
+        };
+
+        if (authType === "it_rt_json") {
+            const rtJson = document.getElementById("rtServiceKeyJson") ? document.getElementById("rtServiceKeyJson").value.trim() : "";
+            if (rtJson) {
+                try {
+                    const parsed = JSON.parse(rtJson);
+                    const ext = extractServiceKeyFields(parsed);
+                    reqPayload.credentials = {
+                        client_id: ext.clientId,
+                        client_secret: ext.clientSecret,
+                        token_url: ext.tokenUrl,
+                        tenant_url: ext.hostUrl
+                    };
+                } catch (e) {
+                    alert("Invalid JSON in Runtime Service Key box");
+                    return;
+                }
+            }
+        } else if (authType === "basic") {
+            reqPayload.runtime_username = document.getElementById("rtUsername") ? document.getElementById("rtUsername").value.trim() : "";
+            reqPayload.runtime_password = document.getElementById("rtPassword") ? document.getElementById("rtPassword").value.trim() : "";
+        } else if (authType === "token") {
+            reqPayload.runtime_token = document.getElementById("rtBearerToken") ? document.getElementById("rtBearerToken").value.trim() : "";
+        }
+
         btnRunSuite.disabled = true;
         btnRunSuite.innerHTML = `<span>⚡</span> Executing on ${isSimMode ? 'Simulation' : 'Live CPI'}...`;
 
@@ -457,11 +522,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/v1/testsuite/run", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    cpi_endpoint: finalEndpoint,
-                    test_cases: currentTestCases,
-                    enable_mpl_check: true
-                })
+                body: JSON.stringify(reqPayload)
             });
 
             if (res.ok) {

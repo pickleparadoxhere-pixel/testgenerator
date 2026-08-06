@@ -152,13 +152,17 @@ class TestSuiteGenerationRequest(BaseModel):
         self.custom_instructions = custom_instructions
 
 class TestExecutionRequest(BaseModel):
-    def __init__(self, cpi_endpoint: str = "", credentials: Any = None, test_cases: Any = None, enable_mpl_check: bool = True, **kwargs):
+    def __init__(self, cpi_endpoint: str = "", credentials: Any = None, test_cases: Any = None, enable_mpl_check: bool = True, runtime_auth_type: str = "default", runtime_username: str = None, runtime_password: str = None, runtime_token: str = None, **kwargs):
         super().__init__(**kwargs)
         self.cpi_endpoint = cpi_endpoint
         self.credentials = CPICredentials(**credentials) if isinstance(credentials, dict) else credentials
         raw_cases = test_cases or []
         self.test_cases = [TestCase.from_dict(tc) for tc in raw_cases]
         self.enable_mpl_check = enable_mpl_check
+        self.runtime_auth_type = runtime_auth_type
+        self.runtime_username = runtime_username
+        self.runtime_password = runtime_password
+        self.runtime_token = runtime_token
 
 class TestResult(BaseModel):
     def __init__(self, test_id: str = "", name: str = "", category: str = "", status: str = "PASS", status_code: int = 200, execution_time_ms: float = 0.0, actual_response: str = "", cpi_mpl_id: str = None, mpl_status: str = None, intercepted_mock_requests: List[Dict[str, Any]] = None, assertion_results: List[Dict[str, Any]] = None, error_message: str = None, **kwargs):
