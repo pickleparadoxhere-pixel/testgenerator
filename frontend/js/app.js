@@ -65,10 +65,7 @@ document.addEventListener("DOMContentLoaded", () => {
     navTabs.forEach(tab => {
         tab.addEventListener("click", () => {
             const target = tab.getAttribute("data-tab");
-            navTabs.forEach(t => t.classList.remove("active"));
-            tabContents.forEach(c => c.classList.remove("active"));
-            tab.classList.add("active");
-            document.getElementById(target).classList.add("active");
+            switchTab(target);
         });
     });
 
@@ -91,7 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/v1/cpi/fetch-iflow/SalesOrder_S4HANA_Creation");
             if (res.ok) {
                 currentIFlow = await res.json();
-                renderIFlowMetadata(currentIFlow);
+                await onIFlowLoaded(currentIFlow);
             }
         } catch (err) {
             alert("Error loading sample iFlow: " + err.message);
@@ -139,7 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (res.ok) {
                 currentIFlow = await res.json();
-                renderIFlowMetadata(currentIFlow);
+                await onIFlowLoaded(currentIFlow);
             } else {
                 const err = await res.json();
                 alert("Upload failed: " + (err.detail || err.error));
@@ -149,10 +146,23 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // --- Process Loaded iFlow ---
+    async function onIFlowLoaded(metadata) {
+        renderIFlowMetadata(metadata);
+        
+        // Auto-generate AI Test Suite & Register Mock Rules
+        if (btnGenerateTests) {
+            await generateTestSuiteInternal(metadata);
+        }
+        
+        // Auto-switch to Step 2: AI Test Studio
+        switchTab("tab-test-studio");
+    }
+
     // --- Render iFlow Metadata ---
     function renderIFlowMetadata(metadata) {
         document.getElementById("iflowStatusBadge").className = "badge status-badge";
-        document.getElementById("iflowStatusBadge").innerText = "Active iFlow Loaded";
+        document.getElementById("iflowStatusBadge").innerText = `Active: ${metadata.id || metadata.name}`;
 
         const receiversHtml = metadata.receiver_endpoints.map(r => 
             `<span class="badge" style="background: rgba(139, 92, 246, 0.15); border-color: var(--accent-purple);">
@@ -275,7 +285,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     <strong style="color: #fff; font-size: 0.9rem;">${item.name}</strong>
                     <div style="font-size: 0.75rem; color: var(--text-muted);">ID: <code>${item.id}</code> | Version: ${item.version || 'active'} | Package: ${item.package_id || 'Default'}</div>
                 </div>
-                <button class="btn btn-sm btn-primary select-iflow-btn" data-id="${item.id}">Select iFlow</button>
+                <button class="btn btn-sm btn-primary select-iflow-btn" data-id="${item.id}">Select iFlow & Generate Tests</button>
             </div>
         `).join("");
 
@@ -285,12 +295,12 @@ document.addEventListener("DOMContentLoaded", () => {
             btn.addEventListener("click", async () => {
                 const iflowId = btn.getAttribute("data-id");
                 iflowPickerModal.classList.remove("active");
-                btnSampleiFlow.innerText = "Loading iFlow...";
+                btnSampleiFlow.innerText = "Fetching iFlow...";
                 try {
                     const res = await fetch(`/api/v1/cpi/fetch-iflow/${iflowId}`);
                     if (res.ok) {
                         currentIFlow = await res.json();
-                        renderIFlowMetadata(currentIFlow);
+                        await onIFlowLoaded(currentIFlow);
                     }
                 } catch (err) {
                     alert("Error fetching iFlow: " + err.message);
@@ -301,14 +311,17 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // --- AI Test Suite Generation ---
+    // --- AI Test Suite Generation Logic ---
     btnGenerateTests.addEventListener("click", async () => {
         if (!currentIFlow) {
             alert("Please load an iFlow package first in Step 1!");
             switchTab("tab-import");
             return;
         }
+        await generateTestSuiteInternal(currentIFlow);
+    });
 
+    async function generateTestSuiteInternal(iflowMeta) {
         btnGenerateTests.disabled = true;
         btnGenerateTests.innerHTML = "<span>✨</span> Synthesizing Test Cases...";
 
@@ -316,7 +329,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/v1/testsuite/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ iflow_metadata: currentIFlow, num_cases_per_category: 1 })
+                body: JSON.stringify({ iflow_metadata: iflowMeta, num_cases_per_category: 1 })
             });
 
             if (res.ok) {
@@ -326,12 +339,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 renderMockRoutes(currentTestCases);
             }
         } catch (err) {
-            alert("Error generating test suite: " + err.message);
+            console.error("Error generating test suite:", err);
         } finally {
             btnGenerateTests.disabled = false;
             btnGenerateTests.innerHTML = "<span>✨</span> Generate AI Test Cases";
         }
-    });
+    }
 
     // --- Render Test Case List & Details ---
     function renderTestCaseList(cases) {
