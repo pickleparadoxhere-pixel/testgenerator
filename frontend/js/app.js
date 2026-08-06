@@ -157,11 +157,11 @@ document.addEventListener("DOMContentLoaded", () => {
         
         // Auto-fill target CPI endpoint URL in Section 4
         if (targetCpiEndpoint) {
-            let inPath = metadata.inbound_endpoint ? metadata.inbound_endpoint.url_path : "/horizon";
-            if (!inPath.startswith("/")) inPath = "/" + inPath;
+            let inPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/horizon";
+            if (!inPath.startsWith("/")) inPath = "/" + inPath;
             
             if (connectedHostUrl) {
-                targetCpiEndpoint.value = `${connectedHostUrl.rstrip('/')}${inPath}`;
+                targetCpiEndpoint.value = `${connectedHostUrl.replace(/\/$/, '')}${inPath}`;
             } else {
                 targetCpiEndpoint.value = `https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com${inPath}`;
             }
