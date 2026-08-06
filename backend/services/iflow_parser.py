@@ -16,10 +16,10 @@ class IFlowParser:
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
                 file_list = z.namelist()
                 
-                # Detect component.xml or bpmn files
+                # Detect component.xml or bpmn or iflw files
                 component_xml_path = None
                 for path in file_list:
-                    if path.endswith("component.xml") or path.endswith(".bpmn"):
+                    if path.endswith("component.xml") or path.endswith(".bpmn") or path.endswith(".iflw"):
                         component_xml_path = path
                         break
                 
@@ -31,7 +31,7 @@ class IFlowParser:
                 iflow_id = filename.replace(".zip", "")
                 iflow_name = iflow_id.replace("_", " ").title()
                 
-                inbound_path = "/cxf/default/endpoint"
+                inbound_path = f"/cxf/http/{iflow_id.lower()}"
                 inbound_adapter = "HTTPS"
                 payload_format = "JSON"
                 receiver_endpoints: List[ReceiverEndpoint] = []
@@ -106,25 +106,50 @@ class IFlowParser:
         result = {"inbound_path": None, "inbound_adapter": "HTTPS", "receivers": []}
         try:
             root = ET.fromstring(xml_content)
-            # Scan all elements for key entries
+            
+            # 1. Parse SAP CPI property elements (<ifl:property><key>...</key><value>...</value></ifl:property>)
+            props = {}
             for elem in root.iter():
-                # Check attributes and text
-                val = elem.attrib.get("value") or elem.attrib.get("address") or elem.text
-                key = elem.attrib.get("key") or elem.tag.split("}")[-1].lower()
-                
-                if val and isinstance(val, str):
-                    if val.startswith("/") or val.startswith("http"):
-                        if not result["inbound_path"]:
-                            result["inbound_path"] = val
-                    elif val in ["HTTPS", "SOAP", "OData", "IDoc", "HTTP", "SFTP"]:
-                        result["inbound_adapter"] = val
-                    elif key == "receiver" and len(val) > 2:
+                tag = elem.tag.split("}")[-1]
+                if tag == "property":
+                    k = None
+                    v = None
+                    for child in elem:
+                        ctag = child.tag.split("}")[-1]
+                        if ctag == "key":
+                            k = child.text
+                        elif ctag == "value":
+                            v = child.text
+                    if k and v:
+                        props[k] = v
+                elif tag == "participant":
+                    name = elem.attrib.get("name") or elem.attrib.get("id")
+                    if name and name not in ["Default Collaboration", "Integration Process", "Participant_Process", "Sender", "Participant_1", "Participant_2"]:
                         result["receivers"].append(ReceiverEndpoint(
-                            name=val,
+                            name=name,
                             adapter_type="HTTP",
-                            url_path=f"/mock/{val.lower()}",
+                            url_path=f"/mock/{name.lower().replace(' ', '_')}",
                             method="POST"
                         ))
+
+            if "urlPath" in props and props["urlPath"]:
+                result["inbound_path"] = props["urlPath"]
+            elif "address" in props and props["address"]:
+                result["inbound_path"] = props["address"]
+
+            if "ComponentType" in props and props["ComponentType"]:
+                result["inbound_adapter"] = props["ComponentType"]
+            elif "TransportProtocol" in props and props["TransportProtocol"]:
+                result["inbound_adapter"] = props["TransportProtocol"]
+
+            # Fallback scan if property elements not found
+            if not result["inbound_path"]:
+                for elem in root.iter():
+                    val = elem.attrib.get("value") or elem.attrib.get("address") or elem.text
+                    if val and isinstance(val, str) and val.startswith("/") and len(val) > 1:
+                        result["inbound_path"] = val
+                        break
+
         except Exception as e:
             logger.warning(f"Could not parse XML tree: {e}")
 
