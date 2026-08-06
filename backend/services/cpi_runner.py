@@ -27,16 +27,17 @@ class CPITestRunner:
 
         # Resolve auth headers based on specified runtime credentials mode
         auth_header_val = None
-        if self.request.runtime_auth_type == "basic" and self.request.runtime_username:
+        if self.request.credentials and self.request.credentials.client_id and self.request.credentials.client_secret:
+            logger.info("Fetching fresh OAuth2 token for live execution using provided runtime credentials.")
+            fetched_token = self._fetch_oauth_token(self.request.credentials)
+            if fetched_token:
+                auth_header_val = f"Bearer {fetched_token}"
+        elif self.request.runtime_auth_type == "basic" and self.request.runtime_username:
             u_pass = f"{self.request.runtime_username}:{self.request.runtime_password or ''}"
             encoded = base64.b64encode(u_pass.encode()).decode()
             auth_header_val = f"Basic {encoded}"
         elif self.request.runtime_auth_type == "token" and self.request.runtime_token:
             auth_header_val = f"Bearer {self.request.runtime_token.strip()}"
-        elif self.request.credentials and self.request.credentials.client_id:
-            fetched_token = self._fetch_oauth_token(self.request.credentials)
-            if fetched_token:
-                auth_header_val = f"Bearer {fetched_token}"
 
         if not auth_header_val and self.default_bearer_token:
             auth_header_val = f"Bearer {self.default_bearer_token}"
@@ -91,7 +92,7 @@ class CPITestRunner:
 
         if not is_simulation:
             try:
-                print(f"🚀 Firing live HTTP POST to CPI Inbound Endpoint: {cpi_endpoint}")
+                logger.info(f"Firing live HTTP POST to CPI Inbound Endpoint: {cpi_endpoint}")
                 req = urllib.request.Request(
                     url=cpi_endpoint,
                     data=test_case.payload.encode("utf-8"),
@@ -102,11 +103,24 @@ class CPITestRunner:
                 with urllib.request.urlopen(req, context=context, timeout=20) as resp:
                     actual_status = resp.status
                     actual_response = resp.read().decode("utf-8", errors="ignore")
-                    cpi_mpl_id = resp.headers.get("SAP_MessageProcessingLogID") or resp.headers.get("SAP-MPL-ID")
+                    
+                    if resp.headers:
+                        for hk, hv in resp.headers.items():
+                            if hk.lower() in ["sap_messageprocessinglogid", "sap-mpl-id", "messageprocessinglogid"]:
+                                cpi_mpl_id = hv
+                                break
+
             except urllib.error.HTTPError as e:
                 actual_status = e.code
                 actual_response = e.read().decode("utf-8", errors="ignore")
-                cpi_mpl_id = e.headers.get("SAP_MessageProcessingLogID") if e.headers else None
+                error_msg = f"HTTP {e.code}: {e.reason}"
+                
+                if e.headers:
+                    for hk, hv in e.headers.items():
+                        if hk.lower() in ["sap_messageprocessinglogid", "sap-mpl-id", "messageprocessinglogid"]:
+                            cpi_mpl_id = hv
+                            break
+
             except Exception as e:
                 logger.warning(f"Error calling CPI runtime endpoint {cpi_endpoint}: {e}")
                 actual_status = 500
@@ -157,8 +171,7 @@ class CPITestRunner:
         status_str = "PASS" if overall_pass else "FAIL"
 
         if not cpi_mpl_id:
-            cpi_mpl_id = f"MPL-{int(time.time()*1000)}"
-        mpl_status = "COMPLETED" if overall_pass else "FAILED"
+            cpi_mpl_id = f"MPL-SIM-{int(time.time()*1000)}"
 
         return TestResult(
             test_id=test_case.id,
@@ -169,7 +182,7 @@ class CPITestRunner:
             execution_time_ms=exec_duration,
             actual_response=actual_response,
             cpi_mpl_id=cpi_mpl_id,
-            mpl_status=mpl_status,
+            mpl_status="COMPLETED" if overall_pass else "FAILED",
             intercepted_mock_requests=intercepted_requests,
             assertion_results=assertion_results,
             error_message=error_msg
