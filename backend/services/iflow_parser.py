@@ -133,9 +133,15 @@ class IFlowParser:
                         ))
 
             if "urlPath" in props and props["urlPath"]:
-                result["inbound_path"] = props["urlPath"]
+                u = props["urlPath"]
+                if not (u.startswith("/http/") or u.startswith("/cxf/")):
+                    u = "/http" + (u if u.startswith("/") else "/" + u)
+                result["inbound_path"] = u
             elif "address" in props and props["address"]:
-                result["inbound_path"] = props["address"]
+                u = props["address"]
+                if not (u.startswith("/http/") or u.startswith("/cxf/")):
+                    u = "/http" + (u if u.startswith("/") else "/" + u)
+                result["inbound_path"] = u
 
             if "ComponentType" in props and props["ComponentType"]:
                 result["inbound_adapter"] = props["ComponentType"]

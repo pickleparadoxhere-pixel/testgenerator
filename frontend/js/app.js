@@ -157,14 +157,14 @@ document.addEventListener("DOMContentLoaded", () => {
         
         // Auto-fill target CPI endpoint URL in Section 4
         if (targetCpiEndpoint) {
-            let inPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/horizon";
+            let inPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/http/horizon";
             if (!inPath.startsWith("/")) inPath = "/" + inPath;
-            
-            if (connectedHostUrl) {
-                targetCpiEndpoint.value = `${connectedHostUrl.replace(/\/$/, '')}${inPath}`;
-            } else {
-                targetCpiEndpoint.value = `https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com${inPath}`;
+            if (!inPath.startsWith("/http/") && !inPath.startsWith("/cxf/")) {
+                inPath = "/http" + inPath;
             }
+            
+            const host = connectedHostUrl ? connectedHostUrl.replace(/\/$/, '') : "https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com";
+            targetCpiEndpoint.value = `${host}${inPath}`;
         }
 
         // Auto-generate AI Test Suite & Register Mock Rules
