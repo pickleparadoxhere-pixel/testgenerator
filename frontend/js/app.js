@@ -43,6 +43,26 @@ document.addEventListener("DOMContentLoaded", () => {
         return { hostUrl: hostUrl.trim(), clientId: clientId.trim(), clientSecret: clientSecret.trim(), tokenUrl: tokenUrl.trim() };
     }
 
+    // --- Extract Relative Path Helper ---
+    function extractRelativePath(pathStr) {
+        if (!pathStr) return "/http/horizon";
+        let p = pathStr.trim();
+        if (p.startsWith("http://") || p.startsWith("https://")) {
+            try {
+                const u = new URL(p);
+                p = u.pathname;
+            } catch (e) {
+                const idx = p.indexOf("/", 8);
+                if (idx !== -1) p = p.substring(idx);
+            }
+        }
+        if (!p.startsWith("/")) p = "/" + p;
+        if (!p.startsWith("/http/") && !p.startsWith("/cxf/")) {
+            p = "/http" + p;
+        }
+        return p;
+    }
+
     // --- Management Service Key (api) Auto-Fill ---
     if (serviceKeyJson) {
         serviceKeyJson.addEventListener("input", () => {
@@ -77,12 +97,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const ext = extractServiceKeyFields(parsed);
             if (ext.hostUrl && targetCpiEndpoint) {
                 const rtHost = ext.hostUrl.replace(/\/$/, '');
-                let inPath = parsedInboundPath;
-                if (!inPath.startsWith("/")) inPath = "/" + inPath;
-                if (!inPath.startsWith("/http/") && !inPath.startsWith("/cxf/")) {
-                    inPath = "/http" + inPath;
-                }
-                targetCpiEndpoint.value = `${rtHost}${inPath}`;
+                const relPath = extractRelativePath(parsedInboundPath);
+                targetCpiEndpoint.value = `${rtHost}${relPath}`;
             }
         } catch (e) {}
     }
@@ -149,21 +165,13 @@ document.addEventListener("DOMContentLoaded", () => {
         renderIFlowMetadata(metadata);
         
         parsedInboundPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/http/horizon";
-        
+        const relPath = extractRelativePath(parsedInboundPath);
+
         if (itRtServiceKeyJson && itRtServiceKeyJson.value.trim()) {
             updateTargetEndpointFromItRt();
         } else if (targetCpiEndpoint) {
-            let inPath = parsedInboundPath;
-            if (inPath.startsWith("http://") || inPath.startsWith("https://")) {
-                targetCpiEndpoint.value = inPath;
-            } else {
-                if (!inPath.startsWith("/")) inPath = "/" + inPath;
-                if (!inPath.startsWith("/http/") && !inPath.startsWith("/cxf/")) {
-                    inPath = "/http" + inPath;
-                }
-                const host = connectedHostUrl ? connectedHostUrl.replace(/\/$/, '') : "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com";
-                targetCpiEndpoint.value = `${host}${inPath}`;
-            }
+            const host = connectedHostUrl ? connectedHostUrl.replace(/\/$/, '') : "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com";
+            targetCpiEndpoint.value = `${host}${relPath}`;
         }
 
         if (btnGenerateTests) await generateTestSuiteInternal(metadata);
