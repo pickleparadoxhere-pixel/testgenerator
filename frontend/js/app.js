@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentTestCases = [];
     let selectedTestCase = null;
     let lastReport = null;
+    let connectedHostUrl = "";
 
     // UI Elements
     const navTabs = document.querySelectorAll(".nav-tab");
@@ -24,6 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnClearMocks = document.getElementById("btnClearMocks");
     const btnRefreshIntercepts = document.getElementById("btnRefreshIntercepts");
     const btnExportJUnit = document.getElementById("btnExportJUnit");
+    const targetCpiEndpoint = document.getElementById("targetCpiEndpoint");
 
     // --- Service Key JSON Auto-Fill ---
     if (serviceKeyJson) {
@@ -34,7 +36,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 const parsed = JSON.parse(raw);
                 const extracted = extractServiceKeyFields(parsed);
 
-                if (extracted.hostUrl && document.getElementById("cpiHost")) document.getElementById("cpiHost").value = extracted.hostUrl;
+                if (extracted.hostUrl && document.getElementById("cpiHost")) {
+                    document.getElementById("cpiHost").value = extracted.hostUrl;
+                    connectedHostUrl = extracted.hostUrl;
+                }
                 if (extracted.clientId && document.getElementById("clientId")) document.getElementById("clientId").value = extracted.clientId;
                 if (extracted.clientSecret && document.getElementById("clientSecret")) document.getElementById("clientSecret").value = extracted.clientSecret;
                 if (extracted.tokenUrl && document.getElementById("tokenUrl")) document.getElementById("tokenUrl").value = extracted.tokenUrl;
@@ -150,6 +155,18 @@ document.addEventListener("DOMContentLoaded", () => {
     async function onIFlowLoaded(metadata) {
         renderIFlowMetadata(metadata);
         
+        // Auto-fill target CPI endpoint URL in Section 4
+        if (targetCpiEndpoint) {
+            let inPath = metadata.inbound_endpoint ? metadata.inbound_endpoint.url_path : "/horizon";
+            if (!inPath.startswith("/")) inPath = "/" + inPath;
+            
+            if (connectedHostUrl) {
+                targetCpiEndpoint.value = `${connectedHostUrl.rstrip('/')}${inPath}`;
+            } else {
+                targetCpiEndpoint.value = `https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com${inPath}`;
+            }
+        }
+
         // Auto-generate AI Test Suite & Register Mock Rules
         if (btnGenerateTests) {
             await generateTestSuiteInternal(metadata);
@@ -236,6 +253,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Not JSON
             }
         }
+
+        connectedHostUrl = tenantUrl;
 
         btnSubmitTenant.innerText = "Connecting to SAP Tenant...";
         btnSubmitTenant.disabled = true;
@@ -426,15 +445,20 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        const isSimMode = document.getElementById("execModeSim") && document.getElementById("execModeSim").checked;
+        const endpointValue = targetCpiEndpoint ? targetCpiEndpoint.value.trim() : "";
+
+        const finalEndpoint = isSimMode ? "/mock/simulated_cpi_inbound" : (endpointValue || "https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon");
+
         btnRunSuite.disabled = true;
-        btnRunSuite.innerHTML = "<span>⚡</span> Executing Suite...";
+        btnRunSuite.innerHTML = `<span>⚡</span> Executing on ${isSimMode ? 'Simulation' : 'Live CPI'}...`;
 
         try {
             const res = await fetch("/api/v1/testsuite/run", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    cpi_endpoint: "/mock/simulated_cpi_inbound",
+                    cpi_endpoint: finalEndpoint,
                     test_cases: currentTestCases,
                     enable_mpl_check: true
                 })

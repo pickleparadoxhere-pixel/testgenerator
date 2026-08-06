@@ -182,6 +182,26 @@
                         </button>
                     </div>
 
+                    <!-- Target CPI Endpoint Configuration Box -->
+                    <div class="card p-3 mb-4" style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3);">
+                        <div class="flex-between mb-2">
+                            <h4 style="font-size: 0.95rem; color: #fff; font-weight: 700;">🎯 Target CPI Endpoint Configuration</h4>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">
+                                    <input type="radio" name="execMode" value="live" id="execModeLive" checked> 🔴 Live SAP CPI Endpoint
+                                </label>
+                                <label style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer; margin-left: 0.8rem;">
+                                    <input type="radio" name="execMode" value="simulation" id="execModeSim"> 🟢 Offline Simulation
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label style="font-size: 0.8rem; color: var(--text-muted);">CPI Inbound HTTP/HTTPS Endpoint URL</label>
+                            <input type="text" id="targetCpiEndpoint" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-cyan);" placeholder="https://cpi-gtxsss73.it-cpitrial03.cfapps.ap21.hana.ondemand.com/http/horizon">
+                        </div>
+                    </div>
+
                     <!-- Summary Stats Bar -->
                     <div class="stats-grid">
                         <div class="stat-card">
