@@ -317,12 +317,13 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             raw_cases = body_json.get("test_cases", [])
             test_cases = [TestCase.from_dict(rc) for rc in raw_cases]
 
+            token = active_cpi_creds.get("bearer_token")
             req = TestExecutionRequest(
                 cpi_endpoint=body_json.get("cpi_endpoint", "simulated"),
                 test_cases=test_cases,
                 enable_mpl_check=body_json.get("enable_mpl_check", True)
             )
-            runner = CPITestRunner(req)
+            runner = CPITestRunner(req, default_bearer_token=token)
             report = runner.execute_suite()
 
             self._set_json_headers(200)

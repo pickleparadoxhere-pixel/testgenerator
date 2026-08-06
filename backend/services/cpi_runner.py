@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 class CPITestRunner:
     """Executes test cases against SAP CPI endpoints and verifies execution results."""
 
-    def __init__(self, request: TestExecutionRequest):
+    def __init__(self, request: TestExecutionRequest, default_bearer_token: Optional[str] = None):
         self.request = request
+        self.default_bearer_token = default_bearer_token
 
     def execute_suite(self) -> TestSuiteReport:
         start_time = time.time()
@@ -23,10 +24,12 @@ class CPITestRunner:
         passed_count = 0
         failed_count = 0
 
-        # Access token for SAP CPI API if OAuth provided
-        access_token = None
+        # Access token for SAP CPI API if OAuth provided or active in session
+        access_token = self.default_bearer_token
         if self.request.credentials:
-            access_token = self._fetch_oauth_token(self.request.credentials)
+            fetched_token = self._fetch_oauth_token(self.request.credentials)
+            if fetched_token:
+                access_token = fetched_token
 
         for test_case in self.request.test_cases:
             # Register test-specific mock rules
@@ -71,12 +74,14 @@ class CPITestRunner:
         actual_status = test_case.expected_status
         actual_response = ""
         error_msg = None
+        cpi_mpl_id = None
 
         # Check if target is a live real network URL or offline simulation endpoint
         is_simulation = "simulated" in cpi_endpoint or not (cpi_endpoint.startswith("http://") or cpi_endpoint.startswith("https://"))
 
         if not is_simulation:
             try:
+                print(f"🚀 Firing live HTTP POST to CPI Inbound Endpoint: {cpi_endpoint}")
                 req = urllib.request.Request(
                     url=cpi_endpoint,
                     data=test_case.payload.encode("utf-8"),
@@ -84,12 +89,14 @@ class CPITestRunner:
                     method="POST"
                 )
                 context = ssl._create_unverified_context()
-                with urllib.request.urlopen(req, context=context, timeout=10) as resp:
+                with urllib.request.urlopen(req, context=context, timeout=20) as resp:
                     actual_status = resp.status
                     actual_response = resp.read().decode("utf-8", errors="ignore")
+                    cpi_mpl_id = resp.headers.get("SAP_MessageProcessingLogID") or resp.headers.get("SAP-MPL-ID")
             except urllib.error.HTTPError as e:
                 actual_status = e.code
                 actual_response = e.read().decode("utf-8", errors="ignore")
+                cpi_mpl_id = e.headers.get("SAP_MessageProcessingLogID") if e.headers else None
             except Exception as e:
                 logger.warning(f"Error calling CPI runtime endpoint {cpi_endpoint}: {e}")
                 actual_status = 500
@@ -139,8 +146,8 @@ class CPITestRunner:
 
         status_str = "PASS" if overall_pass else "FAIL"
 
-        # Mock SAP CPI MPL (Message Processing Log) verification
-        mpl_id = f"MPL-{int(time.time()*1000)}"
+        if not cpi_mpl_id:
+            cpi_mpl_id = f"MPL-{int(time.time()*1000)}"
         mpl_status = "COMPLETED" if overall_pass else "FAILED"
 
         return TestResult(
@@ -151,7 +158,7 @@ class CPITestRunner:
             status_code=actual_status,
             execution_time_ms=exec_duration,
             actual_response=actual_response,
-            cpi_mpl_id=mpl_id,
+            cpi_mpl_id=cpi_mpl_id,
             mpl_status=mpl_status,
             intercepted_mock_requests=intercepted_requests,
             assertion_results=assertion_results,
@@ -167,7 +174,8 @@ class CPITestRunner:
             req.add_header("Authorization", f"Basic {auth_str}")
             req.add_header("Content-Type", "application/x-www-form-urlencoded")
             
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode())
                     return data.get("access_token")

@@ -236,7 +236,8 @@ async def generate_test_suite(request: TestSuiteGenerationRequest):
 # 5. Run Test Suite
 @app.post("/api/v1/testsuite/run", response_model=TestSuiteReport)
 async def run_test_suite(request: TestExecutionRequest):
-    runner = CPITestRunner(request)
+    token = active_session.get("bearer_token")
+    runner = CPITestRunner(request, default_bearer_token=token)
     report = runner.execute_suite()
     return report
 
