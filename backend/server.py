@@ -147,6 +147,16 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             if metadata.name == iflow_id or not metadata.name:
                 metadata.name = iflow_id.replace("_", " ").title()
 
+            if tenant_url and token:
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    full_discovered_url = loop.run_until_complete(discover_cpi_full_endpoint(tenant_url, token, iflow_id))
+                    if full_discovered_url:
+                        metadata.inbound_endpoint.url_path = full_discovered_url
+                except Exception:
+                    pass
+
             if fetch_error:
                 metadata.description = f"Notice: Live ZIP download note ({fetch_error}). Displaying parsed structure."
 
