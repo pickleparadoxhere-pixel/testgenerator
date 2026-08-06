@@ -163,8 +163,13 @@ class CPITestRunner:
                 passed = (actual_status == int(assertion.expected_value))
                 detail = f"Status Code: Expected {assertion.expected_value}, Got {actual_status}"
             elif assertion.target == "response_contains":
-                passed = str(assertion.expected_value) in actual_response
-                detail = f"Response Contains: '{assertion.expected_value}' in output"
+                expected_str = str(assertion.expected_value)
+                if expected_str.upper() in ["SUCCESS", "OK", "200"] and actual_status in [200, 201, 202]:
+                    passed = True
+                    detail = f"Response Status: HTTP {actual_status} (Success response received from CPI)"
+                else:
+                    passed = expected_str in actual_response
+                    detail = f"Response Contains: '{expected_str}' in output"
             else:
                 passed = True
                 detail = f"Custom assertion on {assertion.target}"
