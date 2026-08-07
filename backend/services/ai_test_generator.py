@@ -59,12 +59,10 @@ Attached Message Mappings, WSDLs, XSDs, Groovy Scripts, BPMN XML, and iFlow Cont
 {metadata.inbound_endpoint.raw_schema or 'No schema attached.'}
 
 CRITICAL MANDATE:
-Analyze the attached Message Mapping WSDLs, XSD definitions, Groovy scripts, and BPMN XML to identify the exact SOURCE inbound XML/JSON message structure, target namespace, root element name, complex types, child elements, and attributes.
+Analyze the attached Message Mapping WSDLs, XSD definitions, Groovy scripts, and BPMN XML for THIS SPECIFIC iFlow ({metadata.id}) to identify the exact SOURCE inbound XML/JSON message structure, target namespace, root element name, complex types, child elements, and attributes.
 
-For example, if a WSDL defines `<element name="ProductHierarchy" type="ProductHierarchy">` under targetNamespace `http://demo.sap.com/mapping/context`, your test payloads MUST be XML matching that exact structure:
-`<p1:ProductHierarchy xmlns:p1="http://demo.sap.com/mapping/context"><MainCategory Name="Category1"><Category Name="Sub1"><Product>ItemA</Product></Category></MainCategory></p1:ProductHierarchy>`
-
-Do NOT output generic OrderRequest or JSON payloads when WSDL/XSD XML schemas are attached!
+If WSDLs/XSDs are attached, construct exact XML element structures matching the WSDL root element.
+Do NOT use Supernova or ProductHierarchy schemas for other iFlows!
 
 INSTRUCTIONS:
 Generate exactly:
@@ -133,10 +131,20 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
 
         cases: List[TestCase] = []
 
-        # Check for specific SAP WSDL / XSD schemas (like ProductHierarchy)
-        if "ProductHierarchy" in raw_schema:
-            target_ns = "http://demo.sap.com/mapping/context"
-            happy_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
+        # 1. Dynamically check for WSDL / XSD targetNamespace and root element
+        target_ns = None
+        ns_match = re.search(r'targetNamespace="([^"]+)"', raw_schema)
+        if ns_match:
+            target_ns = ns_match.group(1)
+
+        root_element = None
+        elem_match = re.search(r'<xsd:element name="([^"]+)"', raw_schema) or re.search(r'<element name="([^"]+)"', raw_schema)
+        if elem_match:
+            root_element = elem_match.group(1)
+
+        if root_element and target_ns and "http" in target_ns:
+            if root_element == "ProductHierarchy":
+                happy_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
     <MainCategory Name="Electronics">
         <Category Name="Laptops">
             <Product>MacBook Pro</Product>
@@ -144,18 +152,32 @@ Respond strictly with a JSON array of objects matching this exact structure (no 
         </Category>
     </MainCategory>
 </p1:ProductHierarchy>"""
-
-            boundary_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
+                boundary_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
     <MainCategory Name="ÖÄÜ_Category_&amp;_Special">
         <Category Name="Cat_Max">
             <Product>Product_Long_Text_Limit_Testing_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</Product>
         </Category>
     </MainCategory>
 </p1:ProductHierarchy>"""
-
-            negative_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
+                negative_payload = f"""<p1:ProductHierarchy xmlns:p1="{target_ns}">
     <!-- Missing mandatory MainCategory element -->
 </p1:ProductHierarchy>"""
+            else:
+                happy_payload = f"""<p1:{root_element} xmlns:p1="{target_ns}">
+    <Header>
+        <TransactionID>TRX-100456</TransactionID>
+        <SourceSystem>SAP_CPI_{metadata.id}</SourceSystem>
+    </Header>
+</p1:{root_element}>"""
+                boundary_payload = f"""<p1:{root_element} xmlns:p1="{target_ns}">
+    <Header>
+        <TransactionID>TRX-ÖÄÜ-&amp;-SPECIAL-#999</TransactionID>
+        <SourceSystem>SAP_CPI_MAX_LIMIT_TEST</SourceSystem>
+    </Header>
+</p1:{root_element}>"""
+                negative_payload = f"""<p1:{root_element} xmlns:p1="{target_ns}">
+    <!-- Missing mandatory Header element -->
+</p1:{root_element}>"""
 
         elif format_type == "XML":
             discovered_tags = re.findall(r'<([a-zA-Z0-9_]+)>', raw_schema)

@@ -196,7 +196,6 @@ async def connect_cpi_tenant(body: Dict[str, Any] = Body(...)):
 async def fetch_cpi_iflow_metadata(iflow_id: str):
     tenant_url = active_session.get("tenant_url")
     token = active_session.get("bearer_token")
-    version = active_session.get("version", "active")
 
     zip_bytes = None
     fetch_error = None
@@ -205,11 +204,26 @@ async def fetch_cpi_iflow_metadata(iflow_id: str):
     if tenant_url and token:
         try:
             async with httpx.AsyncClient(verify=False, timeout=20.0) as client:
-                headers = {"Authorization": f"Bearer {token}"}
-                val_url = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='{version}')/$value"
-                resp = await client.get(val_url, headers=headers)
+                headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+                
+                # 1. Query designtime metadata to discover actual Version
+                dt_ver = "active"
+                dt_info_url = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='active')"
+                dt_resp = await client.get(dt_info_url, headers=headers)
+                if dt_resp.status_code == 200:
+                    dt_ver = dt_resp.json().get("d", {}).get("Version", "active")
+
+                # 2. Download designtime ZIP package using discovered Version
+                val_url = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='{dt_ver}')/$value"
+                resp = await client.get(val_url, headers={"Authorization": f"Bearer {token}"})
                 if resp.status_code == 200:
                     zip_bytes = resp.content
+                else:
+                    # Fallback to Version 1.0.0
+                    val_url_fb = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='1.0.0')/$value"
+                    resp_fb = await client.get(val_url_fb, headers={"Authorization": f"Bearer {token}"})
+                    if resp_fb.status_code == 200:
+                        zip_bytes = resp_fb.content
         except Exception as e:
             fetch_error = str(e)
 
@@ -219,7 +233,7 @@ async def fetch_cpi_iflow_metadata(iflow_id: str):
             pass
 
     if not zip_bytes or len(zip_bytes) < 100:
-        zip_bytes = create_sample_iflow_zip()
+        zip_bytes = create_sample_iflow_zip(iflow_id)
 
     metadata = parser.parse_zip(zip_bytes, f"{iflow_id}.zip")
     metadata.id = iflow_id
@@ -254,28 +268,28 @@ async def run_test_suite(request: TestExecutionRequest):
 
 @app.get("/api/v1/sample-iflow")
 def get_sample_iflow():
-    zip_bytes = create_sample_iflow_zip()
+    zip_bytes = create_sample_iflow_zip("Horizon")
     return Response(
         content=zip_bytes,
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=sample_sales_order_iflow.zip"}
     )
 
-def create_sample_iflow_zip() -> bytes:
+def create_sample_iflow_zip(iflow_name: str = "Horizon") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        iflow_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        iflow_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <bpmn2:definitions xmlns:bpmn2="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:ifl="http://sap.com/bpmn/ifl">
     <bpmn2:collaboration id="Collaboration_1">
         <bpmn2:participant id="Participant_Process" name="Integration Process">
             <bpmn2:extensionElements>
                 <ifl:property><key>ComponentType</key><value>HTTPS</value></ifl:property>
-                <ifl:property><key>urlPath</key><value>/http/horizon</value></ifl:property>
+                <ifl:property><key>urlPath</key><value>/http/{iflow_name.lower()}</value></ifl:property>
             </bpmn2:extensionElements>
         </bpmn2:participant>
         <bpmn2:participant id="Participant_S4HANA" name="S4HANA_Backend_OData" />
     </bpmn2:collaboration>
 </bpmn2:definitions>"""
-        z.writestr("src/main/resources/scenarioflows/integrationflow/Horizon.iflw", iflow_xml)
+        z.writestr(f"src/main/resources/scenarioflows/integrationflow/{iflow_name}.iflw", iflow_xml)
         z.writestr("src/main/resources/parameters.prop", "inbound_adapter=HTTPS\n")
     return buf.getvalue()
