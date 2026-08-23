@@ -142,11 +142,29 @@ class TechSpecGenerator:
                             if key in p.text:
                                 p.text = p.text.replace(key, val)
 
-        # 3. Append extracted dynamic analysis sections
-        doc.add_heading(f"Extracted Configuration & Test Payloads for {iflow_name}", level=1)
+        # 3. Append extracted dynamic analysis sections to the reference document
+        doc.add_heading(f"Extracted Specifications for '{iflow_name}' (ID: {iflow_id})", level=1)
+        doc.add_paragraph(
+            f"The following technical specifications, interface sequence steps, configuration table, "
+            f"required HTTP headers, exchange properties, and test payloads were dynamically extracted from iFlow '{iflow_name}'."
+        )
+
+        steps = analysis.get("steps", [])
+        if steps:
+            doc.add_heading("1. Interface Execution Sequence Steps", level=2)
+            for i, step in enumerate(steps, 1):
+                doc.add_paragraph(f"{i}. {step}")
+
+        doc.add_heading("2. Extracted Configuration Mapping Table", level=2)
         self._add_config_table(doc, analysis.get("config", []))
+
+        doc.add_heading("3. Required HTTP Headers", level=2)
         self._add_requirements_table(doc, "Required HTTP Headers", analysis.get("headers", []))
-        self._add_requirements_table(doc, "Required Exchange Properties", analysis.get("properties", []))
+
+        doc.add_heading("4. Required Exchange Properties", level=2)
+        self._add_requirements_table(doc, "Exchange Properties", analysis.get("properties", []))
+
+        doc.add_heading("5. Schema-Derived Test Payloads", level=2)
         self._add_payloads_section(doc, analysis.get("payloads", []))
 
         buf = io.BytesIO()

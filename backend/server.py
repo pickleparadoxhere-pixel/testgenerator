@@ -53,6 +53,48 @@ def extract_docx_from_multipart(raw_bytes: bytes) -> Optional[bytes]:
         return raw_bytes[idx:]
     return None
 
+def parse_multipart_payload(body_bytes: bytes, content_type: str) -> tuple[dict, dict]:
+    fields = {}
+    files = {}
+
+    match = re.search(r'boundary=([^\s;]+)', content_type, re.I)
+    if not match:
+        return fields, files
+
+    boundary = match.group(1).encode()
+    if boundary.startswith(b'"') and boundary.endswith(b'"'):
+        boundary = boundary[1:-1]
+        
+    parts = body_bytes.split(b'--' + boundary)
+    for part in parts:
+        if not part or part == b'--\r\n' or part == b'--':
+            continue
+        
+        if b'\r\n\r\n' in part:
+            header_part, content = part.split(b'\r\n\r\n', 1)
+        elif b'\n\n' in part:
+            header_part, content = part.split(b'\n\n', 1)
+        else:
+            continue
+
+        if content.endswith(b'\r\n'):
+            content = content[:-2]
+        elif content.endswith(b'\n'):
+            content = content[:-1]
+
+        header_text = header_part.decode('utf-8', errors='ignore')
+        name_match = re.search(r'name="([^"]+)"', header_text, re.I)
+        filename_match = re.search(r'filename="([^"]+)"', header_text, re.I)
+        
+        if name_match:
+            field_name = name_match.group(1)
+            if filename_match:
+                files[field_name] = content
+            else:
+                fields[field_name] = content.decode('utf-8', errors='ignore')
+
+    return fields, files
+
 def parse_and_execute_raw_curl(curl_str: str) -> tuple[dict, str]:
     cleaned = curl_str.strip().replace("\\\n", " ").replace("\n", " ")
     res = subprocess.run(cleaned, shell=True, capture_output=True, text=True, timeout=25)
@@ -286,7 +328,21 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                 
                 content_type = self.headers.get("Content-Type", "").lower()
                 if "multipart/form-data" in content_type:
-                    ref_docx_bytes = extract_docx_from_multipart(body_bytes)
+                    fields, files = parse_multipart_payload(body_bytes, content_type)
+                    if "analysis" in fields:
+                        try:
+                            analysis_data = json.loads(fields["analysis"])
+                        except Exception:
+                            pass
+                    if "metadata" in fields:
+                        try:
+                            metadata = json.loads(fields["metadata"])
+                        except Exception:
+                            pass
+                    if "template_file" in files and len(files["template_file"]) > 100:
+                        ref_docx_bytes = files["template_file"]
+                    else:
+                        ref_docx_bytes = extract_docx_from_multipart(body_bytes)
                 else:
                     body_json = json.loads(body_bytes.decode("utf-8") or "{}")
                     analysis_data = body_json.get("analysis") or {}
