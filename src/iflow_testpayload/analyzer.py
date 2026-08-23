@@ -500,6 +500,9 @@ class IFlowAnalyzer:
             if root_name:
                 generated_documents.add(signature)
             document_role = self._schema_role(path, root_name)
+            if document_role == "Target":
+                # Do not generate target happy path payload per user requirement
+                continue
             result.payloads.append(Payload(f"{document_role} happy path — {root_name or path.stem}", "xml", body, self._relative(path)))
         for path in json_schemas:
             try:

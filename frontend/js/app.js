@@ -1,7 +1,7 @@
 // SAP CPI IFlow Test Payload Generator & Live Runner Engine
 document.addEventListener("DOMContentLoaded", () => {
   // Global State
-  let currentIFlowId = "Horizon";
+  let currentIFlowId = "";
   let currentAnalysis = null;
   let currentMetadata = null;
   let activeTenantUrl = "";
@@ -13,7 +13,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const tenantModal = document.getElementById("tenantModal");
   const btnConnectTenant = document.getElementById("btnConnectTenant");
   const btnLoadModalJson = document.getElementById("btnLoadModalJson");
-  const modalServiceKeyJson = document.getElementById("modalServiceKeyJson");
+  const modalApiServiceKeyJson = document.getElementById("modalApiServiceKeyJson");
+  const modalRuntimeServiceKeyJson = document.getElementById("modalRuntimeServiceKeyJson");
   const modalTenantUrl = document.getElementById("modalTenantUrl");
   const modalAuthType = document.getElementById("modalAuthType");
   const modalTokenUrl = document.getElementById("modalTokenUrl");
@@ -95,17 +96,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Auto-fill Modal JSON
-  if (btnLoadModalJson && modalServiceKeyJson) {
+  // Auto-fill Modal JSON (handles both api and it-rt keys dynamically)
+  if (btnLoadModalJson) {
     btnLoadModalJson.addEventListener("click", () => {
-      const res = parseServiceKeyJson(modalServiceKeyJson.value);
-      if (res) {
-        if (res.url) modalTenantUrl.value = res.url;
-        if (res.tokenUrl) modalTokenUrl.value = res.tokenUrl;
-        if (res.clientId) modalClientId.value = res.clientId;
-        if (res.clientSecret) modalClientSecret.value = res.clientSecret;
-        if (res.iflowId) modalIflowName.value = res.iflowId;
-        modalAuthType.value = res.tokenUrl ? "oauth" : "basic";
+      let apiRes = parseServiceKeyJson(modalApiServiceKeyJson ? modalApiServiceKeyJson.value : "");
+      let rtRes = parseServiceKeyJson(modalRuntimeServiceKeyJson ? modalRuntimeServiceKeyJson.value : "");
+
+      if (apiRes) {
+        if (apiRes.url) modalTenantUrl.value = apiRes.url;
+        if (apiRes.tokenUrl) modalTokenUrl.value = apiRes.tokenUrl;
+        if (apiRes.clientId) modalClientId.value = apiRes.clientId;
+        if (apiRes.clientSecret) modalClientSecret.value = apiRes.clientSecret;
+        if (apiRes.iflowId && modalIflowName) modalIflowName.value = apiRes.iflowId;
+        modalAuthType.value = apiRes.tokenUrl ? "oauth" : "basic";
+      }
+
+      if (rtRes) {
+        if (runtimeServiceKeyJson) runtimeServiceKeyJson.value = modalRuntimeServiceKeyJson.value;
+        if (rtRes.tokenUrl) runtimeTokenUrl.value = rtRes.tokenUrl;
+        if (rtRes.clientId) runtimePrincipal.value = rtRes.clientId;
+        if (rtRes.clientSecret) runtimeSecret.value = rtRes.clientSecret;
+        runtimeAuthType.value = rtRes.tokenUrl ? "oauth" : "basic";
+
+        // If api tenant URL wasn't filled, fill from rt URL
+        if (!modalTenantUrl.value && rtRes.url) {
+          modalTenantUrl.value = rtRes.url.replace("-rt.cfapps", ".cfapps");
+        }
+      }
+
+      if (modalConnectStatus) {
+        modalConnectStatus.className = "status-msg success";
+        modalConnectStatus.textContent = "Service keys populated!";
       }
     });
   }
@@ -120,15 +141,24 @@ document.addEventListener("DOMContentLoaded", () => {
         if (res.clientSecret) runtimeSecret.value = res.clientSecret;
         runtimeAuthType.value = res.tokenUrl ? "oauth" : "basic";
 
-        // Derive runtime host URL
+        // Derive runtime host URL & concatenate with analyzed sender adapter urlPath
         if (res.url) {
           let rtHost = res.url.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "");
-          if (currentAnalysis && currentAnalysis.sender_path) {
-            let path = currentAnalysis.sender_path.startsWith("/") ? currentAnalysis.sender_path : "/" + currentAnalysis.sender_path;
-            runtimeEndpoint.value = `${rtHost}${path}`;
-          } else {
-            runtimeEndpoint.value = `${rtHost}/http/${currentIFlowId.toLowerCase()}`;
+          let adapterPath = (currentMetadata && currentMetadata.inbound_endpoint && currentMetadata.inbound_endpoint.url_path) ? currentMetadata.inbound_endpoint.url_path : "";
+          
+          if (adapterPath.startsWith("http://") || adapterPath.startsWith("https://")) {
+            try {
+              let urlObj = new URL(adapterPath);
+              adapterPath = urlObj.pathname;
+            } catch(e) {}
           }
+          if (!adapterPath) {
+            adapterPath = currentIFlowId ? `/http/${currentIFlowId.toLowerCase()}` : "/http/sender";
+          }
+          if (!adapterPath.startsWith("/")) {
+            adapterPath = "/" + adapterPath;
+          }
+          runtimeEndpoint.value = `${rtHost}${adapterPath}`;
         }
         if (runtimeJsonStatus) {
           runtimeJsonStatus.className = "status-msg success";
@@ -169,7 +199,7 @@ document.addEventListener("DOMContentLoaded", () => {
         token_url: modalTokenUrl.value.trim(),
         client_id: modalClientId.value.trim(),
         client_secret: modalClientSecret.value.trim(),
-        iflow_name: modalIflowName.value.trim() || "Horizon"
+        iflow_name: (modalIflowName ? modalIflowName.value.trim() : "")
       };
 
       try {
@@ -279,15 +309,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const markdownStr = currentAnalysis.report_markdown || "No report generated.";
     reportMarkdownContainer.textContent = markdownStr;
 
-    // 3. Auto-populate Deployed Endpoint URL
-    let epUrl = currentMetadata.inbound_endpoint ? currentMetadata.inbound_endpoint.url_path : "";
-    if (epUrl && !epUrl.startsWith("http")) {
-      if (activeTenantUrl) {
-        let rtHost = activeTenantUrl.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "");
-        epUrl = `${rtHost}${epUrl}`;
+    // 3. Auto-populate Deployed Endpoint URL based strictly on sender adapter url_path
+    let adapterPath = (currentMetadata.inbound_endpoint && currentMetadata.inbound_endpoint.url_path) ? currentMetadata.inbound_endpoint.url_path : "";
+    let rtCreds = parseServiceKeyJson(runtimeServiceKeyJson ? runtimeServiceKeyJson.value : "");
+    let rtHost = (rtCreds && rtCreds.url) ? rtCreds.url.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "") : (activeTenantUrl ? activeTenantUrl.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "") : "");
+
+    if (adapterPath) {
+      if (adapterPath.startsWith("http://") || adapterPath.startsWith("https://")) {
+        runtimeEndpoint.value = adapterPath;
+      } else {
+        if (!adapterPath.startsWith("/")) adapterPath = "/" + adapterPath;
+        runtimeEndpoint.value = rtHost ? `${rtHost}${adapterPath}` : adapterPath;
       }
+    } else {
+      let fallbackPath = currentIFlowId ? `/http/${currentIFlowId.toLowerCase()}` : "/http/sender";
+      runtimeEndpoint.value = rtHost ? `${rtHost}${fallbackPath}` : `https://cpi-tenant-rt.cfapps.sap.com${fallbackPath}`;
     }
-    runtimeEndpoint.value = epUrl || `https://cpi-tenant-rt.cfapps.sap.com/http/${currentIFlowId.toLowerCase()}`;
 
     // 4. Populate Payload Select dropdown
     runtimePayloadSelect.innerHTML = "";

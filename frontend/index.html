@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SAP CPI IFlow Test Payload Generator & Runner</title>
+  <title>SAP CPI IFlow Test Payload Generator & Live Runner</title>
   <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +26,7 @@
           <span class="dot"></span> Not Connected
         </span>
         <button id="btnOpenTenantModal" class="btn btn-secondary">
-          <span>🔑</span> Connect CPI Tenant (api)
+          <span>🔑</span> Connect CPI Tenant (api / it-rt)
         </button>
         <button id="btnLoadSample" class="btn btn-outline">
           <span>📦</span> Sample iFlow
@@ -136,10 +136,10 @@
       <!-- Service Key JSON Box -->
       <div class="service-key-box">
         <label class="field-label">
-          <span>Paste integration-flow Service Key JSON</span>
+          <span>Paste integration-flow Service Key JSON (it-rt)</span>
           <span class="hint-tag">Auto-populates runtime OAuth & endpoint URL</span>
         </label>
-        <textarea id="runtimeServiceKeyJson" class="code-textarea" rows="3" placeholder='{"oauth":{"url":"https://runtime.example.com","clientid":"sb-xxx!b196","clientsecret":"xxx=","tokenurl":"https://.../oauth/token"}}'></textarea>
+        <textarea id="runtimeServiceKeyJson" class="code-textarea" rows="3" placeholder='{"oauth":{"url":"https://cpi-tenant-rt.cfapps.ap21.hana.ondemand.com","clientid":"sb-xxx!b135881|it-rt-...","clientsecret":"xxx=","tokenurl":"https://.../oauth/token"}}'></textarea>
         <div class="service-key-actions">
           <button id="btnLoadRuntimeJson" class="btn btn-secondary btn-sm"><span>⚡</span> Auto-Populate Credentials & Endpoint</button>
           <span id="runtimeJsonStatus" class="status-msg"></span>
@@ -149,9 +149,9 @@
       <!-- Runtime Endpoint & Auth Fields -->
       <div class="form-grid">
         <div class="field-group wide">
-          <label class="field-label">Deployed IFlow Endpoint URL</label>
-          <input type="url" id="runtimeEndpoint" class="form-input" placeholder="e.g. https://cpi-tenant-rt.cfapps.sap.com/http/horizon">
-          <span id="runtimeEndpointSource" class="field-hint">Auto-derived from sender adapter configuration.</span>
+          <label class="field-label">Deployed IFlow Endpoint URL (derived from sender adapter urlPath)</label>
+          <input type="url" id="runtimeEndpoint" class="form-input" placeholder="e.g. https://cpi-tenant-rt.cfapps.sap.com/http/supernova">
+          <span id="runtimeEndpointSource" class="field-hint">Auto-derived from sender adapter configuration urlPath.</span>
         </div>
 
         <div class="field-group">
@@ -221,7 +221,7 @@
       </div>
     </section>
 
-    <!-- Section 4: Request-Reply Mock Target -->
+    <!-- Section 4: Request-Reply Receiver Mock Target -->
     <section class="panel" id="section-mock">
       <div class="panel-header">
         <h2>4. Request-Reply Receiver Mock Target</h2>
@@ -269,21 +269,26 @@
   <div id="tenantModal" class="modal-overlay" style="display: none;">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>Connect to SAP CPI Tenant (OData api)</h3>
+        <h3>Connect to SAP CPI Tenant</h3>
         <button id="btnCloseTenantModal" class="close-btn">&times;</button>
       </div>
       <div class="modal-body">
         <div class="service-key-box">
-          <label class="field-label">Paste BTP Service Key JSON (api plan)</label>
-          <textarea id="modalServiceKeyJson" class="code-textarea" rows="3" placeholder='{"oauth":{"url":"https://cpi-tenant.it-cpitrial03.cfapps.ap21.hana.ondemand.com","clientid":"sb-xxx!b196","clientsecret":"xxx=","tokenurl":"https://.../oauth/token"}}'></textarea>
+          <label class="field-label">Paste BTP Service Key JSON (api plan - Management OData)</label>
+          <textarea id="modalApiServiceKeyJson" class="code-textarea" rows="2" placeholder='{"oauth":{"url":"https://cpi-tenant.it-cpitrial03.cfapps.ap21.hana.ondemand.com","clientid":"sb-xxx!b196","clientsecret":"xxx=","tokenurl":"https://.../oauth/token"}}'></textarea>
+        </div>
+
+        <div class="service-key-box" style="margin-top: 12px;">
+          <label class="field-label">Paste BTP Service Key JSON (integration-flow plan - Runtime it-rt)</label>
+          <textarea id="modalRuntimeServiceKeyJson" class="code-textarea" rows="2" placeholder='{"oauth":{"url":"https://cpi-tenant-rt.cfapps.ap21.hana.ondemand.com","clientid":"sb-xxx!b135881|it-rt-...","clientsecret":"xxx=","tokenurl":"https://.../oauth/token"}}'></textarea>
           <div class="service-key-actions">
             <button id="btnLoadModalJson" class="btn btn-secondary btn-sm">Fill fields from JSON</button>
           </div>
         </div>
 
-        <div class="form-grid">
+        <div class="form-grid" style="margin-top: 16px;">
           <div class="field-group wide">
-            <label class="field-label">Tenant Host URL</label>
+            <label class="field-label">Management Tenant Host URL (api)</label>
             <input type="url" id="modalTenantUrl" class="form-input" placeholder="https://cpi-tenant.it-cpitrial03.cfapps.ap21.hana.ondemand.com">
           </div>
 
@@ -310,9 +315,9 @@
             <input type="password" id="modalClientSecret" class="form-input" placeholder="••••••••••••">
           </div>
 
-          <div class="field-group">
-            <label class="field-label">Artifact ID / Search</label>
-            <input type="text" id="modalIflowName" class="form-input" value="Horizon">
+          <div class="field-group wide">
+            <label class="field-label">Artifact ID / Search (leave blank to list all deployed iFlows)</label>
+            <input type="text" id="modalIflowName" class="form-input" value="" placeholder="e.g. Supernova, Horizon (leave blank to list all)">
           </div>
         </div>
       </div>
