@@ -123,14 +123,14 @@ class TestSAPCPIAgent(unittest.TestCase):
         from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
         agent = CPIDiscoveryAgent()
         
-        # Test 1: 24h Failure Count returns STATISTIC without arbitrary artifact table
+        # Test 1: 24h Failure Count returns TEXT_ANSWER without arbitrary artifact table
         res1 = agent.execute_query("how many failures in last 24 hours?")
-        self.assertEqual(res1["query_type"], "STATISTIC")
+        self.assertEqual(res1["query_type"], "TEXT_ANSWER")
         self.assertEqual(len(res1["table_data"]), 0)
 
-        # Test 2: 6h Failure Count returns STATISTIC with 6h label
+        # Test 2: 6h Failure Count returns TEXT_ANSWER with 6h label
         res2 = agent.execute_query("how many failures in last 6 hours?")
-        self.assertEqual(res2["query_type"], "STATISTIC")
+        self.assertEqual(res2["query_type"], "TEXT_ANSWER")
         self.assertIn("Last 6 Hours", res2["statistics"]["period_label"])
 
 if __name__ == "__main__":

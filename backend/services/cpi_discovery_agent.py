@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 class CPIDiscoveryAgent:
     """
-    Unified SAP CPI Autonomous Agent with Intent Classification,
-    Exact Dynamic Time Math, Tool Routing, Source Audit Logging, and Zero Hallucination.
+    Unified SAP CPI Autonomous Agent.
+    Strictly separates Natural-Language Text Answers from Explicit iFlow Artifact Listings.
     """
 
     def __init__(self, api_key: str = None):
@@ -61,13 +61,14 @@ class CPIDiscoveryAgent:
             intent, disc_registry, mon_registry, disc_model, mon_model, query_clean, active_api_key
         )
 
+        # Append source audit bullet points if not already present
         sources_bullets = "\n".join([f"- `{src}`" for src in sources])
         if "I checked:" not in answer_text:
             answer_text += f"\n\n**I checked:**\n{sources_bullets}"
 
         return {
             "query": query_clean,
-            "query_type": query_type,  # STATISTIC, METRIC_BREAKDOWN, CERTIFICATES, HEALTH_REPORT, ARTIFACTS_LIST
+            "query_type": query_type,  # TEXT_ANSWER, HEALTH_REPORT, ARTIFACTS_LIST
             "answer": answer_text,
             "statistics": stats_dict,
             "table_data": table_data,
@@ -93,9 +94,9 @@ class CPIDiscoveryAgent:
         # Check for un-supported API data requests
         unsupported = ["database password", "cpu utilization", "ram usage", "host os key", "private rsa secret"]
         if any(u in raw_query.lower() for u in unsupported):
-            return "STATISTIC", "This information is not available from the current CPI API data.", None, [], ["API Metadata Inspection"], None
+            return "TEXT_ANSWER", "This information is not available from the current CPI API data.", None, [], ["API Metadata Inspection"], None
 
-        # 1. TENANT_HEALTH Intent
+        # 1. TENANT_HEALTH Intent -> Return Rich Text Summary
         if intent.domain == "TENANT_HEALTH":
             sources = ["MessageProcessingLogs", "KeystoreEntries", "IntegrationRuntimeArtifacts", "IntegrationDesigntimeArtifacts"]
             report = mon_registry.generate_tenant_health_report()
@@ -114,22 +115,30 @@ class CPIDiscoveryAgent:
             )
             return "HEALTH_REPORT", answer, None, [], sources, report
 
-        # 2. CERTIFICATE Intent
+        # 2. CERTIFICATE Intent -> Return Rich Text Summary
         if intent.domain == "CERTIFICATE":
             sources = ["KeystoreEntries"]
             max_days = intent.filters.get("max_days_to_expiry", 30)
             certs = mon_registry.get_keystore_entries(max_days_to_expiry=max_days)
 
-            if intent.operation == "COUNT":
-                count = len(certs)
-                answer = f"There are **{count} certificate(s)** expiring within {max_days} days."
-                stats = {"metric": "expiring_certificates", "count": count, "max_days": max_days}
-                return "STATISTIC", answer, stats, certs, sources, None
+            count = len(certs)
+            if count == 0:
+                answer = f"There are **0 certificates** expiring within {max_days} days."
+            else:
+                cert_lines = []
+                for c in certs:
+                    alias = c.get("alias", "")
+                    days = c.get("days_remaining", 0)
+                    risk = c.get("risk_status", "OK")
+                    emoji = "🔴" if risk in ["CRITICAL", "EXPIRED"] else "🟠"
+                    cert_lines.append(f"• {emoji} **{alias}** — Expires in {days} days ({risk})")
+                
+                answer = f"There are **{count} certificate(s)** expiring within {max_days} days:\n\n" + "\n".join(cert_lines)
 
-            answer = f"Found **{len(certs)} certificate(s)** expiring within {max_days} days:"
-            return "CERTIFICATES", answer, None, certs, sources, None
+            stats = {"metric": "expiring_certificates", "count": count, "max_days": max_days}
+            return "TEXT_ANSWER", answer, stats, [], sources, None
 
-        # 3. MESSAGE_PROCESSING Intent
+        # 3. MESSAGE_PROCESSING Intent -> Return Rich Text Summary
         if intent.domain == "MESSAGE_PROCESSING":
             sources = ["MessageProcessingLogs"]
             tr = intent.time_range
@@ -155,7 +164,7 @@ class CPIDiscoveryAgent:
                     "end_time": tr.end_time.isoformat(),
                     "source": "MessageProcessingLogs"
                 }
-                return "STATISTIC", answer, stat_obj, [], sources, None
+                return "TEXT_ANSWER", answer, stat_obj, [], sources, None
 
             if intent.operation == "TREND":
                 trend = mon_registry.compare_failure_trends(iflow_name=intent.filters.get("iflow_name"))
@@ -166,7 +175,7 @@ class CPIDiscoveryAgent:
                     f"**Percentage Change:** {trend['percentage_change']}%\n"
                     f"**Assessment:** {trend['assessment']}"
                 )
-                return "STATISTIC", answer, trend, [], sources, None
+                return "TEXT_ANSWER", answer, trend, [], sources, None
 
             if intent.operation in ["RANKING", "BREAKDOWN", "PERCENTAGE"]:
                 stats = mon_registry.get_failure_statistics(
@@ -178,17 +187,24 @@ class CPIDiscoveryAgent:
                 if intent.limit:
                     breakdown = breakdown[:intent.limit]
 
-                answer = f"Found **{len(breakdown)} iFlow(s)** with message processing activity in the **{tr.label}**:"
-                return "METRIC_BREAKDOWN", answer, stats, breakdown, sources, None
+                if not breakdown:
+                    answer = f"There were **0 failed messages** recorded in the **{tr.label}**."
+                else:
+                    lines = [f"### 📊 Top Failing iFlows ({tr.label})\n"]
+                    for idx, item in enumerate(breakdown, 1):
+                        lines.append(f"{idx}. **{item['iflow_name']}** — **{item['failed']} failures** ({item['failure_rate']}% failure rate out of {item['total']} messages)")
+                    answer = "\n".join(lines)
 
-        # 4. PACKAGE_SEARCH Intent
+                return "TEXT_ANSWER", answer, stats, [], sources, None
+
+        # 4. PACKAGE_SEARCH Intent -> Explicit Listing Request
         if intent.domain == "PACKAGE_SEARCH":
             sources = ["IntegrationPackages"]
             pkgs = disc_registry.list_packages(search_term=intent.filters.get("search_term"))
             answer = f"Found **{len(pkgs)} integration package(s)**:"
             return "ARTIFACTS_LIST", answer, None, pkgs, sources, None
 
-        # 5. ARTIFACT_SEARCH Intent (Fallback)
+        # 5. ARTIFACT_SEARCH Intent -> Explicit Artifact Listing Request
         sources = ["IntegrationDesigntimeArtifacts", "IntegrationRuntimeArtifacts"]
         filtered, reason = disc_registry.filter_and_correlate_artifacts(
             adapter_type=intent.filters.get("adapter_type"),
@@ -196,7 +212,7 @@ class CPIDiscoveryAgent:
             is_deployed=intent.filters.get("is_deployed"),
             date_expression=intent.time_range.expression
         )
-        answer = f"Found **{len(filtered)} artifact(s)** matching your question ({reason}):"
+        answer = f"Found **{len(filtered)} artifact(s)** matching your request ({reason}):"
         return "ARTIFACTS_LIST", answer, None, filtered, sources, None
 
     def _fetch_all_cpi_apis(

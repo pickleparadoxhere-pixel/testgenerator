@@ -20,27 +20,26 @@ class TestCPIAcceptanceCriteria(unittest.TestCase):
         self.assertEqual(intent6.operation, "COUNT")
         self.assertIn("Last 6 Hours", intent6.time_range.label)
 
-    def test_24h_failure_count_returns_statistic_not_iflow_table(self):
+    def test_24h_failure_count_returns_text_answer_not_iflow_table(self):
         res = self.agent.execute_query("how many failures in last 24 hours?")
-        self.assertEqual(res["query_type"], "STATISTIC")
+        self.assertEqual(res["query_type"], "TEXT_ANSWER")
         self.assertIsNotNone(res["statistics"])
         self.assertEqual(res["statistics"]["metric"], "message_failures")
         self.assertEqual(len(res["table_data"]), 0)  # NO arbitrary artifact table!
-        self.assertIn("Last 24 Hours", res["statistics"]["period_label"])
+        self.assertIn("message failure(s)", res["answer"])
 
-    def test_ranking_and_breakdown_returns_iflow_statistics(self):
+    def test_ranking_and_breakdown_returns_text_answer(self):
         res = self.agent.execute_query("Which 5 iFlows failed the most this week?")
-        self.assertIn(res["query_type"], ["METRIC_BREAKDOWN", "RANKING"])
-        self.assertGreater(len(res["table_data"]), 0)
-        self.assertIn("iflow_name", res["table_data"][0])
-        self.assertIn("failure_rate", res["table_data"][0])
+        self.assertEqual(res["query_type"], "TEXT_ANSWER")
+        self.assertEqual(len(res["table_data"]), 0)
+        self.assertIn("Top Failing iFlows", res["answer"])
+        self.assertIn("Horizon", res["answer"])
 
     def test_certificate_monitoring(self):
         res = self.agent.execute_query("Which certificates expire within 30 days?")
-        self.assertEqual(res["query_type"], "CERTIFICATES")
-        self.assertGreater(len(res["table_data"]), 0)
-        self.assertIn("alias", res["table_data"][0])
-        self.assertIn("risk_status", res["table_data"][0])
+        self.assertEqual(res["query_type"], "TEXT_ANSWER")
+        self.assertEqual(len(res["table_data"]), 0)
+        self.assertIn("sap_cpi_client_cert", res["answer"])
 
     def test_tenant_health_report(self):
         res = self.agent.execute_query("Give me a CPI health report.")
@@ -50,8 +49,13 @@ class TestCPIAcceptanceCriteria(unittest.TestCase):
 
     def test_trend_comparison(self):
         res = self.agent.execute_query("Compare failures in the last 24 hours with the previous 24 hours.")
-        self.assertEqual(res["query_type"], "STATISTIC")
+        self.assertEqual(res["query_type"], "TEXT_ANSWER")
         self.assertIn("Failure Trend Analysis", res["answer"])
+
+    def test_explicit_artifact_listing(self):
+        res = self.agent.execute_query("Find all iFlows containing SFTP")
+        self.assertEqual(res["query_type"], "ARTIFACTS_LIST")
+        self.assertGreater(len(res["table_data"]), 0)
 
     def test_no_hallucination_for_unsupported_queries(self):
         res = self.agent.execute_query("Show me the private database password for Horizon")

@@ -600,7 +600,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (resp.ok) {
         if (discoveryStatus) {
           discoveryStatus.className = "status-msg success";
-          discoveryStatus.textContent = `Found ${data.matched_count} matching iFlow(s).`;
+          if (data.query_type === "ARTIFACTS_LIST") {
+            discoveryStatus.textContent = `Found ${data.matched_count} artifact(s).`;
+          } else {
+            discoveryStatus.textContent = `Query processed cleanly.`;
+          }
         }
         displayDiscoveryResults(data);
       } else {
@@ -624,93 +628,43 @@ document.addEventListener("DOMContentLoaded", () => {
     discoveryResultsBox.style.display = "block";
 
     const discoveryThead = document.getElementById("discoveryThead");
-    const queryType = data.query_type || "ARTIFACTS_LIST";
+    const discoveryTableContainer = discoveryThead ? discoveryThead.closest(".table-responsive") : null;
+    const queryType = data.query_type || "TEXT_ANSWER";
 
-    // Format bold markdown tags in answer
+    // Format markdown in answer text
     let formattedAnswer = escapeHtml(data.answer || "")
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-      .replace(/### (.*?)\n/g, "<h3>$1</h3>")
+      .replace(/### (.*?)\n/g, "<h3 style='margin-top: 12px; margin-bottom: 6px; color: var(--primary);'>$1</h3>")
       .replace(/• (.*?)\n/g, "• $1<br>")
       .replace(/\n\n/g, "<br><br>");
     agentAnswerText.innerHTML = formattedAnswer;
 
+    // Hide iFlow Table COMPLETELY unless query_type is ARTIFACTS_LIST!
+    if (queryType !== "ARTIFACTS_LIST" || !data.table_data || data.table_data.length === 0) {
+      if (discoveryTableContainer) discoveryTableContainer.style.display = "none";
+      discoveryTbody.innerHTML = "";
+      return;
+    }
+
+    // Explicit ARTIFACTS_LIST presentation
+    if (discoveryTableContainer) discoveryTableContainer.style.display = "block";
+    if (discoveryThead) {
+      discoveryThead.style.display = "table-header-group";
+      discoveryThead.innerHTML = `
+        <tr>
+          <th>Artifact ID</th>
+          <th>Name</th>
+          <th>Version</th>
+          <th>Package</th>
+          <th>Status</th>
+          <th>Adapters / Tech</th>
+          <th>Action</th>
+        </tr>
+      `;
+    }
+
     discoveryTbody.innerHTML = "";
-    const results = data.table_data || data.results || [];
-
-    // 1. STATISTIC / HEALTH_REPORT (No table needed if count or summary)
-    if (queryType === "STATISTIC" || queryType === "HEALTH_REPORT" || results.length === 0) {
-      if (discoveryThead) discoveryThead.style.display = "none";
-      return;
-    }
-
-    if (discoveryThead) discoveryThead.style.display = "table-header-group";
-
-    // 2. METRIC_BREAKDOWN (Failure Statistics / Rankings)
-    if (queryType === "METRIC_BREAKDOWN") {
-      discoveryThead.innerHTML = `
-        <tr>
-          <th>iFlow Name</th>
-          <th>Total Messages</th>
-          <th>Failed Messages</th>
-          <th>Successful Messages</th>
-          <th>Failure Rate</th>
-        </tr>
-      `;
-      results.forEach(item => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td><strong>${escapeHtml(item.iflow_name || "")}</strong></td>
-          <td>${item.total || 0}</td>
-          <td><span class="badge badge-error">${item.failed || 0}</span></td>
-          <td><span class="badge badge-success">${item.success || 0}</span></td>
-          <td><strong>${item.failure_rate || 0}%</strong></td>
-        `;
-        discoveryTbody.appendChild(tr);
-      });
-      return;
-    }
-
-    // 3. CERTIFICATES
-    if (queryType === "CERTIFICATES") {
-      discoveryThead.innerHTML = `
-        <tr>
-          <th>Alias</th>
-          <th>Type</th>
-          <th>Owner</th>
-          <th>Valid Until</th>
-          <th>Days Remaining</th>
-          <th>Risk Status</th>
-        </tr>
-      `;
-      results.forEach(item => {
-        const tr = document.createElement("tr");
-        const isCrit = item.risk_status === "CRITICAL" || item.risk_status === "EXPIRED";
-        tr.innerHTML = `
-          <td><strong>${escapeHtml(item.alias || "")}</strong></td>
-          <td><span class="badge">${escapeHtml(item.type || "KeyPair")}</span></td>
-          <td>${escapeHtml(item.owner || "Tenant")}</td>
-          <td>${escapeHtml(item.valid_until ? item.valid_until.substring(0, 10) : "")}</td>
-          <td><strong>${item.days_remaining} days</strong></td>
-          <td><span class="badge ${isCrit ? 'badge-error' : 'badge-success'}">${item.risk_status}</span></td>
-        `;
-        discoveryTbody.appendChild(tr);
-      });
-      return;
-    }
-
-    // 4. ARTIFACTS_LIST (Default)
-    discoveryThead.innerHTML = `
-      <tr>
-        <th>Artifact ID</th>
-        <th>Name</th>
-        <th>Version</th>
-        <th>Package</th>
-        <th>Status</th>
-        <th>Adapters / Tech</th>
-        <th>Action</th>
-      </tr>
-    `;
-    results.forEach(item => {
+    data.table_data.forEach(item => {
       const tr = document.createElement("tr");
       const adaptersStr = (item.adapters || []).map(ad => `<span class="badge">${escapeHtml(ad)}</span>`).join(" ");
       const isDeployed = item.status === "DEPLOYED" || item.is_deployed;
