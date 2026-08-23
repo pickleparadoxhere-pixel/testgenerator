@@ -148,6 +148,12 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_static_file("index.html", "text/html")
+        elif path.endswith(".css") or path.startswith("/css/"):
+            rel_path = path.replace("/static/", "").lstrip("/")
+            self._serve_static_file(rel_path, "text/css")
+        elif path.endswith(".js") or path.startswith("/js/"):
+            rel_path = path.replace("/static/", "").lstrip("/")
+            self._serve_static_file(rel_path, "application/javascript")
         elif path.startswith("/static/"):
             rel_path = path.replace("/static/", "")
             mime = "text/css" if rel_path.endswith(".css") else ("application/javascript" if rel_path.endswith(".js") else "text/html")

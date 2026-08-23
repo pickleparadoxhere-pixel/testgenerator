@@ -109,6 +109,22 @@ def read_root():
             return Response(content=f.read(), media_type="text/html")
     return {"message": "SAP CPI Automated Test Studio & Payload Generator API is running."}
 
+@app.get("/css/{file_name}")
+def serve_css(file_name: str):
+    file_path = os.path.join(frontend_dir, "css", file_name)
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return Response(content=f.read(), media_type="text/css")
+    raise HTTPException(status_code=404, detail="CSS file not found")
+
+@app.get("/js/{file_name}")
+def serve_js(file_name: str):
+    file_path = os.path.join(frontend_dir, "js", file_name)
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return Response(content=f.read(), media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="JS file not found")
+
 @app.post("/api/v1/iflow/parse")
 async def parse_iflow_zip(file: UploadFile = File(...)):
     if not file.filename.endswith(".zip"):
