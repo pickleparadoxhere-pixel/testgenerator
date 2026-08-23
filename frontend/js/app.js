@@ -1,635 +1,539 @@
+// SAP CPI IFlow Test Payload Generator & Live Runner Engine
 document.addEventListener("DOMContentLoaded", () => {
-    // --- Global State ---
-    let currentIFlow = null;
-    let currentTestCases = [];
-    let selectedTestCase = null;
-    let lastReport = null;
-    let connectedHostUrl = "";
-    let parsedInboundPath = "/http/horizon";
-    let isSimMode = false;
+  // Global State
+  let currentIFlowId = "Horizon";
+  let currentAnalysis = null;
+  let currentMetadata = null;
+  let activeTenantUrl = "";
+  let generatedPayloads = [];
 
-    // --- DOM Elements ---
-    const navTabs = document.querySelectorAll(".nav-tab");
-    const tabContents = document.querySelectorAll(".tab-content");
+  // DOM Elements - Modal & Connection
+  const btnOpenTenantModal = document.getElementById("btnOpenTenantModal");
+  const btnCloseTenantModal = document.getElementById("btnCloseTenantModal");
+  const tenantModal = document.getElementById("tenantModal");
+  const btnConnectTenant = document.getElementById("btnConnectTenant");
+  const btnLoadModalJson = document.getElementById("btnLoadModalJson");
+  const modalServiceKeyJson = document.getElementById("modalServiceKeyJson");
+  const modalTenantUrl = document.getElementById("modalTenantUrl");
+  const modalAuthType = document.getElementById("modalAuthType");
+  const modalTokenUrl = document.getElementById("modalTokenUrl");
+  const modalClientId = document.getElementById("modalClientId");
+  const modalClientSecret = document.getElementById("modalClientSecret");
+  const modalIflowName = document.getElementById("modalIflowName");
+  const modalConnectStatus = document.getElementById("modalConnectStatus");
+  const tenantStatusBadge = document.getElementById("tenantStatusBadge");
 
-    const btnSampleiFlow = document.getElementById("btnSampleiFlow");
-    const btnConnectTenant = document.getElementById("btnConnectTenant");
-    const tenantModal = document.getElementById("tenantModal");
-    const serviceKeyJson = document.getElementById("serviceKeyJson");
-    const btnSubmitTenant = document.getElementById("btnSubmitTenant");
-    const iflowPickerModal = document.getElementById("iflowPickerModal");
-    const iflowPickerList = document.getElementById("iflowPickerList");
+  // DOM Elements - Artifacts & Upload
+  const liveArtifactsContainer = document.getElementById("liveArtifactsContainer");
+  const liveArtifactsTbody = document.getElementById("liveArtifactsTbody");
+  const liveArtifactCount = document.getElementById("liveArtifactCount");
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const dirInput = document.getElementById("dirInput");
+  const dropFilename = document.getElementById("dropFilename");
+  const btnAnalyze = document.getElementById("btnAnalyze");
+  const analyzeStatus = document.getElementById("analyzeStatus");
 
-    const dropZone = document.getElementById("dropZone");
-    const fileInput = document.getElementById("fileInput");
+  // DOM Elements - Analysis & Payloads
+  const sectionResults = document.getElementById("section-results");
+  const payloadCardsList = document.getElementById("payloadCardsList");
+  const reportMarkdownContainer = document.getElementById("reportMarkdownContainer");
+  const btnDownloadReport = document.getElementById("btnDownloadReport");
 
-    const btnGenerateTests = document.getElementById("btnGenerateTests");
-    const btnRunSuite = document.getElementById("btnRunSuite");
-    
-    const toggleLive = document.getElementById("toggleLive");
-    const toggleSim = document.getElementById("toggleSim");
-    
-    const targetCpiEndpoint = document.getElementById("targetCpiEndpoint");
-    const runtimeAuthType = document.getElementById("runtimeAuthType");
-    const itRtServiceKeyJson = document.getElementById("itRtServiceKeyJson");
-    const btnToggleCredsBox = document.getElementById("btnToggleCredsBox");
-    const credsExpandBox = document.getElementById("credsExpandBox");
+  // DOM Elements - Test Window
+  const sectionTestWindow = document.getElementById("section-test-window");
+  const runtimeServiceKeyJson = document.getElementById("runtimeServiceKeyJson");
+  const btnLoadRuntimeJson = document.getElementById("btnLoadRuntimeJson");
+  const runtimeJsonStatus = document.getElementById("runtimeJsonStatus");
+  const runtimeEndpoint = document.getElementById("runtimeEndpoint");
+  const runtimeEndpointSource = document.getElementById("runtimeEndpointSource");
+  const runtimeAuthType = document.getElementById("runtimeAuthType");
+  const runtimeTokenUrl = document.getElementById("runtimeTokenUrl");
+  const runtimePrincipal = document.getElementById("runtimePrincipal");
+  const runtimeSecret = document.getElementById("runtimeSecret");
+  const runtimePayloadSelect = document.getElementById("runtimePayloadSelect");
+  const runtimeHeaders = document.getElementById("runtimeHeaders");
+  const runtimeBody = document.getElementById("runtimeBody");
+  const btnSendRuntimeTest = document.getElementById("btnSendRuntimeTest");
+  const runtimeTestStatus = document.getElementById("runtimeTestStatus");
+  const runtimeResponseCard = document.getElementById("runtimeResponseCard");
+  const resStatusBadge = document.getElementById("resStatusBadge");
+  const resLatency = document.getElementById("resLatency");
+  const resMplIdBox = document.getElementById("resMplIdBox");
+  const resMplId = document.getElementById("resMplId");
+  const resHeadersText = document.getElementById("resHeadersText");
+  const resBodyText = document.getElementById("resBodyText");
 
-    const btnClearMocks = document.getElementById("btnClearMocks");
-    const btnRefreshIntercepts = document.getElementById("btnRefreshIntercepts");
+  // DOM Elements - Mock Server
+  const mockUrl = document.getElementById("mockUrl");
+  const mockReceiverName = document.getElementById("mockReceiverName");
+  const mockStatus = document.getElementById("mockStatus");
+  const mockContentType = document.getElementById("mockContentType");
+  const mockBody = document.getElementById("mockBody");
+  const btnSaveMock = document.getElementById("btnSaveMock");
+  const mockSaveStatus = document.getElementById("mockSaveStatus");
+  const btnLoadSample = document.getElementById("btnLoadSample");
 
-    // --- Tab Navigation ---
-    if (navTabs) {
-        navTabs.forEach(tab => {
-            tab.addEventListener("click", () => {
-                const target = tab.getAttribute("data-tab");
-                switchTab(target);
-            });
+  let selectedFiles = [];
+
+  // --- Helper: Service Key JSON Parser ---
+  function parseServiceKeyJson(str) {
+    if (!str || !str.trim()) return null;
+    try {
+      const parsed = JSON.parse(str);
+      const oauth = parsed.oauth || parsed.credentials || parsed.service_key || parsed;
+      const url = oauth.url || oauth.management_url || oauth.service_url || oauth.api || parsed.tenant_url || parsed.url || "";
+      const tokenUrl = oauth.tokenurl || oauth.token_url || parsed.token_url || parsed.tokenurl || "";
+      const clientId = oauth.clientid || oauth.client_id || parsed.client_id || parsed.clientid || parsed.username || "";
+      const clientSecret = oauth.clientsecret || oauth.client_secret || parsed.client_secret || parsed.clientsecret || parsed.password || "";
+      const iflowId = parsed.iflowId || parsed.artifactId || parsed.iflow_name || "";
+      const version = parsed.version || parsed.iflowVersion || "active";
+
+      return { url: url.trim(), tokenUrl: tokenUrl.trim(), clientId: clientId.trim(), clientSecret: clientSecret.trim(), iflowId: iflowId.trim(), version: version.trim() };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Auto-fill Modal JSON
+  if (btnLoadModalJson && modalServiceKeyJson) {
+    btnLoadModalJson.addEventListener("click", () => {
+      const res = parseServiceKeyJson(modalServiceKeyJson.value);
+      if (res) {
+        if (res.url) modalTenantUrl.value = res.url;
+        if (res.tokenUrl) modalTokenUrl.value = res.tokenUrl;
+        if (res.clientId) modalClientId.value = res.clientId;
+        if (res.clientSecret) modalClientSecret.value = res.clientSecret;
+        if (res.iflowId) modalIflowName.value = res.iflowId;
+        modalAuthType.value = res.tokenUrl ? "oauth" : "basic";
+      }
+    });
+  }
+
+  // Auto-fill Runtime JSON
+  if (btnLoadRuntimeJson && runtimeServiceKeyJson) {
+    btnLoadRuntimeJson.addEventListener("click", () => {
+      const res = parseServiceKeyJson(runtimeServiceKeyJson.value);
+      if (res) {
+        if (res.tokenUrl) runtimeTokenUrl.value = res.tokenUrl;
+        if (res.clientId) runtimePrincipal.value = res.clientId;
+        if (res.clientSecret) runtimeSecret.value = res.clientSecret;
+        runtimeAuthType.value = res.tokenUrl ? "oauth" : "basic";
+
+        // Derive runtime host URL
+        if (res.url) {
+          let rtHost = res.url.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "");
+          if (currentAnalysis && currentAnalysis.sender_path) {
+            let path = currentAnalysis.sender_path.startsWith("/") ? currentAnalysis.sender_path : "/" + currentAnalysis.sender_path;
+            runtimeEndpoint.value = `${rtHost}${path}`;
+          } else {
+            runtimeEndpoint.value = `${rtHost}/http/${currentIFlowId.toLowerCase()}`;
+          }
+        }
+        if (runtimeJsonStatus) {
+          runtimeJsonStatus.className = "status-msg success";
+          runtimeJsonStatus.textContent = "Runtime credentials & endpoint auto-populated!";
+        }
+      } else {
+        if (runtimeJsonStatus) {
+          runtimeJsonStatus.className = "status-msg error";
+          runtimeJsonStatus.textContent = "Invalid Service Key JSON format.";
+        }
+      }
+    });
+  }
+
+  // Modal Handlers
+  if (btnOpenTenantModal && tenantModal) {
+    btnOpenTenantModal.addEventListener("click", () => {
+      tenantModal.style.display = "flex";
+    });
+  }
+
+  if (btnCloseTenantModal && tenantModal) {
+    btnCloseTenantModal.addEventListener("click", () => {
+      tenantModal.style.display = "none";
+    });
+  }
+
+  // Connect Tenant API
+  if (btnConnectTenant) {
+    btnConnectTenant.addEventListener("click", async () => {
+      modalConnectStatus.className = "status-msg";
+      modalConnectStatus.textContent = "Authenticating with BTP OAuth...";
+      btnConnectTenant.disabled = true;
+
+      const payload = {
+        tenant_url: modalTenantUrl.value.trim(),
+        auth_type: modalAuthType.value,
+        token_url: modalTokenUrl.value.trim(),
+        client_id: modalClientId.value.trim(),
+        client_secret: modalClientSecret.value.trim(),
+        iflow_name: modalIflowName.value.trim() || "Horizon"
+      };
+
+      try {
+        const resp = await fetch("/api/v1/cpi/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         });
+        const data = await resp.json();
+
+        if (resp.ok && data.status === "LIVE_SUCCESS") {
+          modalConnectStatus.className = "status-msg success";
+          modalConnectStatus.textContent = data.message;
+          activeTenantUrl = payload.tenant_url;
+
+          // Update Status Badge
+          tenantStatusBadge.className = "status-pill status-connected";
+          tenantStatusBadge.innerHTML = `<span class="dot"></span> Connected: ${new URL(payload.tenant_url).hostname}`;
+
+          // Render Artifacts Table
+          renderArtifactsTable(data.iflows || []);
+          setTimeout(() => { tenantModal.style.display = "none"; }, 1200);
+        } else {
+          modalConnectStatus.className = "status-msg error";
+          modalConnectStatus.textContent = data.error || "Connection failed.";
+        }
+      } catch (err) {
+        modalConnectStatus.className = "status-msg error";
+        modalConnectStatus.textContent = `Network error: ${err.message}`;
+      } finally {
+        btnConnectTenant.disabled = false;
+      }
+    });
+  }
+
+  // Render Artifacts Table
+  function renderArtifactsTable(artifacts) {
+    if (!artifacts || artifacts.length === 0) return;
+    liveArtifactsContainer.style.display = "block";
+    liveArtifactCount.textContent = `${artifacts.length} found`;
+    liveArtifactsTbody.innerHTML = "";
+
+    artifacts.forEach((art, idx) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="radio" name="selected_artifact" value="${art.id}" ${idx === 0 ? "checked" : ""}></td>
+        <td><strong>${art.id}</strong></td>
+        <td>${art.name || art.id}</td>
+        <td><span class="badge">${art.version || "active"}</span></td>
+        <td>${art.package_id || "DefaultPackage"}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm btn-fetch-art" data-id="${art.id}">
+            <span>⚡</span> Analyze & Payloads
+          </button>
+        </td>
+      `;
+      liveArtifactsTbody.appendChild(tr);
+    });
+
+    // Add click event for each row button
+    document.querySelectorAll(".btn-fetch-art").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = e.currentTarget.getAttribute("data-id");
+        fetchAndAnalyzeIFlow(id);
+      });
+    });
+  }
+
+  // Fetch & Analyze iFlow
+  async function fetchAndAnalyzeIFlow(iflowId) {
+    currentIFlowId = iflowId;
+    analyzeStatus.className = "status-msg";
+    analyzeStatus.textContent = `Downloading & analyzing '${iflowId}'...`;
+
+    try {
+      const resp = await fetch(`/api/v1/cpi/fetch-iflow/${iflowId}`);
+      const data = await resp.json();
+
+      if (resp.ok) {
+        analyzeStatus.className = "status-msg success";
+        analyzeStatus.textContent = `Analysis complete for '${iflowId}'!`;
+        displayAnalysisResults(data);
+      } else {
+        analyzeStatus.className = "status-msg error";
+        analyzeStatus.textContent = data.error || "Failed to analyze iFlow.";
+      }
+    } catch (err) {
+      analyzeStatus.className = "status-msg error";
+      analyzeStatus.textContent = `Error: ${err.message}`;
+    }
+  }
+
+  // Display Analysis Results & Payloads
+  function displayAnalysisResults(data) {
+    currentMetadata = data.metadata || {};
+    currentAnalysis = data.analysis || {};
+    generatedPayloads = currentAnalysis.payloads || [];
+
+    // Show Results & Test Window Sections
+    sectionResults.style.display = "block";
+    sectionTestWindow.style.display = "block";
+
+    // 1. Render Test Payload Cards
+    renderPayloadCards(generatedPayloads);
+
+    // 2. Render Markdown Report
+    const markdownStr = currentAnalysis.report_markdown || "No report generated.";
+    reportMarkdownContainer.textContent = markdownStr;
+
+    // 3. Auto-populate Deployed Endpoint URL
+    let epUrl = currentMetadata.inbound_endpoint ? currentMetadata.inbound_endpoint.url_path : "";
+    if (epUrl && !epUrl.startsWith("http")) {
+      if (activeTenantUrl) {
+        let rtHost = activeTenantUrl.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "");
+        epUrl = `${rtHost}${epUrl}`;
+      }
+    }
+    runtimeEndpoint.value = epUrl || `https://cpi-tenant-rt.cfapps.sap.com/http/${currentIFlowId.toLowerCase()}`;
+
+    // 4. Populate Payload Select dropdown
+    runtimePayloadSelect.innerHTML = "";
+    if (generatedPayloads.length > 0) {
+      generatedPayloads.forEach((p, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = `${p.scenario} (${p.format})`;
+        runtimePayloadSelect.appendChild(opt);
+      });
+      // Load first payload into body
+      runtimeBody.value = generatedPayloads[0].body;
     }
 
-    function switchTab(tabId) {
-        if (navTabs) {
-            navTabs.forEach(t => {
-                if (t.getAttribute("data-tab") === tabId) t.classList.add("active");
-                else t.classList.remove("active");
-            });
-        }
-        if (tabContents) {
-            tabContents.forEach(c => {
-                if (c.id === tabId) c.classList.add("active");
-                else c.classList.remove("active");
-            });
-        }
+    // Scroll to results cleanly
+    sectionResults.scrollIntoView({ behavior: "smooth" });
+  }
+
+  // Render Payload Cards
+  function renderPayloadCards(payloads) {
+    payloadCardsList.innerHTML = "";
+    if (!payloads || payloads.length === 0) {
+      payloadCardsList.innerHTML = `<p class="hint">No payload schemas detected in this iFlow.</p>`;
+      return;
     }
 
-    // --- Live / Sim Toggle Switch ---
-    if (toggleLive && toggleSim) {
-        toggleLive.addEventListener("click", () => {
-            isSimMode = false;
-            toggleLive.classList.add("active");
-            toggleSim.classList.remove("active");
+    payloads.forEach((p, idx) => {
+      const card = document.createElement("div");
+      card.className = "payload-card";
+      card.innerHTML = `
+        <div class="payload-card-header">
+          <h3>Scenario: ${p.scenario}</h3>
+          <span class="badge">${p.format.toUpperCase()}</span>
+        </div>
+        <p class="hint">Derived from <code>${p.source}</code></p>
+        <pre class="code-block">${escapeHtml(p.body)}</pre>
+        <div class="payload-card-actions">
+          <button class="btn btn-secondary btn-sm btn-copy-payload" data-index="${idx}">📋 Copy Payload</button>
+          <button class="btn btn-primary btn-sm btn-load-runner" data-index="${idx}">⚡ Load into Test Runner</button>
+        </div>
+      `;
+      payloadCardsList.appendChild(card);
+    });
+
+    // Copy Payload buttons
+    document.querySelectorAll(".btn-copy-payload").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const idx = e.currentTarget.getAttribute("data-index");
+        const body = payloads[idx].body;
+        navigator.clipboard.writeText(body);
+        e.currentTarget.textContent = "✓ Copied!";
+        setTimeout(() => { e.currentTarget.textContent = "📋 Copy Payload"; }, 1500);
+      });
+    });
+
+    // Load into Runner buttons
+    document.querySelectorAll(".btn-load-runner").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const idx = e.currentTarget.getAttribute("data-index");
+        runtimePayloadSelect.value = idx;
+        runtimeBody.value = payloads[idx].body;
+        sectionTestWindow.scrollIntoView({ behavior: "smooth" });
+      });
+    });
+  }
+
+  // Payload Selector change event
+  if (runtimePayloadSelect) {
+    runtimePayloadSelect.addEventListener("change", (e) => {
+      const idx = e.target.value;
+      if (generatedPayloads[idx]) {
+        runtimeBody.value = generatedPayloads[idx].body;
+      }
+    });
+  }
+
+  // Tab Switching logic
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+
+      e.currentTarget.classList.add("active");
+      const targetId = e.currentTarget.getAttribute("data-tab");
+      document.getElementById(targetId).classList.add("active");
+    });
+  });
+
+  // Call Deployed IFlow
+  if (btnSendRuntimeTest) {
+    btnSendRuntimeTest.addEventListener("click", async () => {
+      runtimeTestStatus.className = "status-msg";
+      runtimeTestStatus.textContent = "Sending live request to SAP CPI...";
+      btnSendRuntimeTest.disabled = true;
+      runtimeResponseCard.style.display = "none";
+
+      const payload = {
+        endpoint: runtimeEndpoint.value.trim(),
+        principal: runtimePrincipal.value.trim(),
+        secret: runtimeSecret.value.trim(),
+        auth_type: runtimeAuthType.value,
+        token_url: runtimeTokenUrl.value.trim(),
+        headers: runtimeHeaders.value.trim(),
+        body: runtimeBody.value
+      };
+
+      try {
+        const resp = await fetch("/api/v1/runtime/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         });
-        toggleSim.addEventListener("click", () => {
-            isSimMode = true;
-            toggleSim.classList.add("active");
-            toggleLive.classList.remove("active");
+        const data = await resp.json();
+
+        if (resp.ok || data.status) {
+          runtimeTestStatus.className = "status-msg success";
+          runtimeTestStatus.textContent = "Execution finished.";
+          displayRuntimeResponse(data);
+        } else {
+          runtimeTestStatus.className = "status-msg error";
+          runtimeTestStatus.textContent = data.error || "Invocation error.";
+        }
+      } catch (err) {
+        runtimeTestStatus.className = "status-msg error";
+        runtimeTestStatus.textContent = `Network error: ${err.message}`;
+      } finally {
+        btnSendRuntimeTest.disabled = false;
+      }
+    });
+  }
+
+  // Display Runtime Execution Response
+  function displayRuntimeResponse(data) {
+    runtimeResponseCard.style.display = "block";
+    const status = data.status || 200;
+    const isSuccess = status >= 200 && status < 300;
+
+    resStatusBadge.className = isSuccess ? "badge badge-success" : "badge badge-error";
+    resStatusBadge.textContent = `HTTP ${status} ${data.reason || ""}`;
+    resLatency.textContent = `⏱️ ${data.elapsed_ms || 0} ms`;
+
+    if (data.mpl_id) {
+      resMplIdBox.style.display = "inline-flex";
+      resMplId.textContent = data.mpl_id;
+    } else {
+      resMplIdBox.style.display = "none";
+    }
+
+    resHeadersText.textContent = JSON.stringify(data.headers || {}, null, 2);
+    resBodyText.textContent = data.body || "(Empty response body)";
+
+    runtimeResponseCard.scrollIntoView({ behavior: "smooth" });
+  }
+
+  // Save Receiver Mock Config
+  if (btnSaveMock) {
+    btnSaveMock.addEventListener("click", async () => {
+      mockSaveStatus.className = "status-msg";
+      mockSaveStatus.textContent = "Saving mock response rule...";
+      btnSaveMock.disabled = true;
+
+      const payload = {
+        receiver_name: mockReceiverName.value.trim() || "receiver",
+        status: parseInt(mockStatus.value, 10) || 200,
+        content_type: mockContentType.value.trim() || "application/xml",
+        body: mockBody.value
+      };
+
+      try {
+        const resp = await fetch("/api/v1/mock/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         });
-    }
+        const data = await resp.json();
 
-    // --- Collapsible Runtime Key Box ---
-    if (btnToggleCredsBox && credsExpandBox) {
-        btnToggleCredsBox.addEventListener("click", () => {
-            credsExpandBox.style.display = (credsExpandBox.style.display === "none") ? "block" : "none";
+        if (resp.ok) {
+          mockSaveStatus.className = "status-msg success";
+          mockSaveStatus.textContent = `Saved! Mock Receiver URL: ${data.url || ''}`;
+          if (data.url) mockUrl.value = data.url;
+        } else {
+          mockSaveStatus.className = "status-msg error";
+          mockSaveStatus.textContent = data.error || "Failed to save mock.";
+        }
+      } catch (err) {
+        mockSaveStatus.className = "status-msg error";
+        mockSaveStatus.textContent = `Error: ${err.message}`;
+      } finally {
+        btnSaveMock.disabled = false;
+      }
+    });
+  }
+
+  // Load Sample iFlow
+  if (btnLoadSample) {
+    btnLoadSample.addEventListener("click", () => {
+      fetchAndAnalyzeIFlow("Horizon");
+    });
+  }
+
+  // File Upload Handlers
+  if (fileInput) {
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        selectedFiles = Array.from(e.target.files);
+        dropFilename.textContent = selectedFiles.map(f => f.name).join(", ");
+        btnAnalyze.disabled = false;
+      }
+    });
+  }
+
+  if (btnAnalyze) {
+    btnAnalyze.addEventListener("click", async () => {
+      if (selectedFiles.length === 0) return;
+      analyzeStatus.className = "status-msg";
+      analyzeStatus.textContent = "Uploading & analyzing package...";
+      btnAnalyze.disabled = true;
+
+      const formData = new FormData();
+      selectedFiles.forEach(f => formData.append("files", f));
+
+      try {
+        const resp = await fetch("/api/v1/iflow/parse", {
+          method: "POST",
+          body: formData
         });
-    }
-
-    // --- Helper to extract relative endpoint path ---
-    function extractRelativePath(fullOrRelUrl) {
-        if (!fullOrRelUrl) return "/http/horizon";
-        let clean = fullOrRelUrl.trim();
-        if (clean.startsWith("http://") || clean.startsWith("https://")) {
-            try {
-                const u = new URL(clean);
-                clean = u.pathname;
-            } catch (e) {
-                const parts = clean.split(".hana.ondemand.com");
-                if (parts.length > 1) clean = parts[1];
-            }
+        const data = await resp.json();
+        if (resp.ok) {
+          analyzeStatus.className = "status-msg success";
+          analyzeStatus.textContent = "Analysis complete!";
+          displayAnalysisResults(data);
+        } else {
+          analyzeStatus.className = "status-msg error";
+          analyzeStatus.textContent = data.error || "Failed to parse file.";
         }
-        if (!clean.startsWith("/")) clean = "/" + clean;
-        return clean;
-    }
+      } catch (err) {
+        analyzeStatus.className = "status-msg error";
+        analyzeStatus.textContent = `Error: ${err.message}`;
+      } finally {
+        btnAnalyze.disabled = false;
+      }
+    });
+  }
 
-    // --- Extract Service Key Fields Helper ---
-    function extractServiceKeyFields(keyObj) {
-        if (!keyObj || typeof keyObj !== 'object') return {};
-        let src = keyObj.oauth || keyObj.credentials || keyObj.service_key || keyObj;
-        let hostUrl = src.url || src.management_url || src.service_url || src.api || '';
-        if (!hostUrl && src.endpoints) {
-            hostUrl = src.endpoints.api || src.endpoints.url || src.endpoints.web || '';
-        }
-        let clientId = src.clientid || src.client_id || (src.oauth ? (src.oauth.clientid || src.oauth.client_id) : '');
-        let clientSecret = src.clientsecret || src.client_secret || (src.oauth ? (src.oauth.clientsecret || src.oauth.client_secret) : '');
-        let tokenUrl = src.tokenurl || src.token_url || (src.oauth ? (src.oauth.tokenurl || src.oauth.token_url) : '');
-        return { hostUrl: hostUrl.trim(), clientId: clientId.trim(), clientSecret: clientSecret.trim(), tokenUrl: tokenUrl.trim() };
-    }
-
-    function updateTargetEndpointFromItRt() {
-        if (!itRtServiceKeyJson || !itRtServiceKeyJson.value.trim()) return;
-        try {
-            const parsed = JSON.parse(itRtServiceKeyJson.value.trim());
-            const ext = extractServiceKeyFields(parsed);
-            if (ext.hostUrl && targetCpiEndpoint) {
-                const rtHost = ext.hostUrl.replace(/\/$/, '');
-                const relPath = extractRelativePath(targetCpiEndpoint.value || parsedInboundPath);
-                targetCpiEndpoint.value = `${rtHost}${relPath}`;
-            }
-        } catch (e) {}
-    }
-
-    if (itRtServiceKeyJson) {
-        itRtServiceKeyJson.addEventListener("input", updateTargetEndpointFromItRt);
-    }
-
-    // --- Load Sample iFlow ---
-    if (btnSampleiFlow) {
-        btnSampleiFlow.addEventListener("click", async () => {
-            btnSampleiFlow.disabled = true;
-            btnSampleiFlow.innerText = "Loading iFlow...";
-            try {
-                const res = await fetch("/api/v1/cpi/fetch-iflow/SalesOrder_S4HANA_Creation");
-                if (res.ok) {
-                    currentIFlow = await res.json();
-                    await onIFlowLoaded(currentIFlow);
-                }
-            } catch (err) {
-                alert("Error loading sample iFlow: " + err.message);
-            } finally {
-                btnSampleiFlow.disabled = false;
-                btnSampleiFlow.innerHTML = "<span>📦</span> Load Sample iFlow";
-            }
-        });
-    }
-
-    // --- File Drag & Drop Upload ---
-    if (dropZone) {
-        dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("dragover"); });
-        dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
-        dropZone.addEventListener("drop", (e) => {
-            e.preventDefault();
-            dropZone.classList.remove("dragover");
-            if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]);
-        });
-    }
-
-    if (fileInput) {
-        fileInput.addEventListener("change", (e) => {
-            if (e.target.files.length) handleFileUpload(e.target.files[0]);
-        });
-    }
-
-    async function handleFileUpload(file) {
-        if (!file.name.endsWith(".zip")) { alert("Please upload an iFlow .zip bundle"); return; }
-        const formData = new FormData();
-        formData.append("file", file);
-        try {
-            const res = await fetch("/api/v1/iflow/parse", { method: "POST", body: formData });
-            if (res.ok) {
-                currentIFlow = await res.json();
-                await onIFlowLoaded(currentIFlow);
-            } else {
-                const err = await res.json();
-                alert("Upload failed: " + (err.detail || err.error));
-            }
-        } catch (err) { alert("Upload error: " + err.message); }
-    }
-
-    // --- Process Loaded iFlow ---
-    async function onIFlowLoaded(metadata) {
-        renderIFlowMetadata(metadata);
-        
-        parsedInboundPath = (metadata.inbound_endpoint && metadata.inbound_endpoint.url_path) ? metadata.inbound_endpoint.url_path : "/http/horizon";
-        const relPath = extractRelativePath(parsedInboundPath);
-
-        if (itRtServiceKeyJson && itRtServiceKeyJson.value.trim()) {
-            updateTargetEndpointFromItRt();
-        } else if (targetCpiEndpoint) {
-            const host = connectedHostUrl ? connectedHostUrl.replace(/\/$/, '') : "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com";
-            targetCpiEndpoint.value = `${host}${relPath}`;
-        }
-
-        if (btnGenerateTests) await generateTestSuiteInternal(metadata);
-        switchTab("tab-test-studio");
-    }
-
-    // --- Render iFlow Metadata ---
-    function renderIFlowMetadata(metadata) {
-        const badge = document.getElementById("iflowStatusBadge");
-        if (badge) {
-            badge.className = "badge status-badge";
-            badge.innerText = `Active: ${metadata.id || metadata.name}`;
-        }
-
-        const receiversHtml = metadata.receiver_endpoints.map(r => 
-            `<span class="badge" style="background: rgba(99, 102, 241, 0.12); border-color: rgba(99, 102, 241, 0.25); color: #818cf8;">${r.name} (${r.adapter_type})</span>`
-        ).join(" ");
-
-        const scriptsHtml = metadata.groovy_scripts.map(s => `<code>${s}</code>`).join(", ") || "None";
-
-        const metaBody = document.getElementById("metadataBody");
-        if (metaBody) {
-            metaBody.innerHTML = `
-                <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-                    <div>
-                        <h4 style="font-size: 1.05rem; color: #fff; font-weight: 600;">${metadata.name}</h4>
-                        <p style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.15rem;">${metadata.description || ''}</p>
-                    </div>
-                    <hr style="border: 0; border-top: 1px solid var(--border-color);" />
-                    <div>
-                        <strong style="font-size: 0.78rem; color: var(--text-muted);">Inbound Sender Endpoint:</strong>
-                        <div style="margin-top: 0.25rem;">
-                            <code style="color: var(--accent-cyan); font-size: 0.82rem;">[${metadata.inbound_endpoint.adapter_type}] ${metadata.inbound_endpoint.url_path}</code>
-                        </div>
-                    </div>
-                    <div>
-                        <strong style="font-size: 0.78rem; color: var(--text-muted);">Receiver Systems to Mock:</strong>
-                        <div style="margin-top: 0.35rem; display: flex; gap: 0.35rem; flex-wrap: wrap;">${receiversHtml}</div>
-                    </div>
-                    <div>
-                        <strong style="font-size: 0.78rem; color: var(--text-muted);">Detected Groovy Scripts:</strong>
-                        <div style="margin-top: 0.25rem; font-size: 0.78rem;">${scriptsHtml}</div>
-                    </div>
-                </div>
-            `;
-        }
-    }
-
-    // --- SAP Tenant Modal Connection Handler ---
-    if (btnConnectTenant && tenantModal) {
-        btnConnectTenant.addEventListener("click", () => {
-            tenantModal.classList.add("active");
-            setTimeout(() => { if (serviceKeyJson) serviceKeyJson.focus(); }, 150);
-        });
-    }
-
-    if (btnSubmitTenant) {
-        btnSubmitTenant.addEventListener("click", async () => {
-            const rawJson = serviceKeyJson ? serviceKeyJson.value.trim() : "";
-            let tenantUrl = document.getElementById("cpiHost") ? document.getElementById("cpiHost").value.trim() : "";
-            let clientId = document.getElementById("clientId") ? document.getElementById("clientId").value.trim() : "";
-            let clientSecret = document.getElementById("clientSecret") ? document.getElementById("clientSecret").value.trim() : "";
-            let tokenUrl = document.getElementById("tokenUrl") ? document.getElementById("tokenUrl").value.trim() : "";
-            let iflowName = document.getElementById("iflowName") ? document.getElementById("iflowName").value.trim() : "Horizon";
-            let version = document.getElementById("iflowVersion") ? document.getElementById("iflowVersion").value.trim() : "active";
-
-            if (rawJson) {
-                try {
-                    const parsed = JSON.parse(rawJson);
-                    const ext = extractServiceKeyFields(parsed);
-                    if (ext.hostUrl) tenantUrl = ext.hostUrl;
-                    if (ext.clientId) clientId = ext.clientId;
-                    if (ext.clientSecret) clientSecret = ext.clientSecret;
-                    if (ext.tokenUrl) tokenUrl = ext.tokenUrl;
-                } catch (e) {}
-            }
-
-            connectedHostUrl = tenantUrl;
-            btnSubmitTenant.innerText = "Connecting to SAP Tenant...";
-            btnSubmitTenant.disabled = true;
-
-            try {
-                const res = await fetch("/api/v1/cpi/connect", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ tenant_url: tenantUrl, client_id: clientId, client_secret: clientSecret, token_url: tokenUrl, iflow_name: iflowName, version: version })
-                });
-                const data = await res.json();
-                if (res.ok && data.status !== "ERROR") {
-                    if (tenantModal) tenantModal.classList.remove("active");
-                    showIFlowPickerModal(data.iflows || [], true);
-                } else {
-                    alert(`❌ Connection Response:\n\n${data.error || 'Connection failed.'}`);
-                }
-            } catch (err) {
-                alert("Network Error: " + err.message);
-            } finally {
-                btnSubmitTenant.innerText = "Fetch iFlow";
-                btnSubmitTenant.disabled = false;
-            }
-        });
-    }
-
-    function showIFlowPickerModal(iflows, isLive) {
-        if (!iflows.length) { alert("No iFlows found on tenant."); return; }
-        const titleEl = document.querySelector("#iflowPickerModal h3");
-        if (titleEl) titleEl.innerText = isLive ? "🟢 Connected Live Tenant - Select iFlow" : "📦 Demo Mode - Select Sample iFlow";
-
-        if (iflowPickerList) {
-            iflowPickerList.innerHTML = iflows.map(item => `
-                <div class="test-item" style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;" data-id="${item.id}">
-                    <div>
-                        <strong style="color: #fff; font-size: 0.85rem;">${item.name}</strong>
-                        <div style="font-size: 0.72rem; color: var(--text-muted);">ID: <code>${item.id}</code> | Version: ${item.version || 'active'}</div>
-                    </div>
-                    <button class="btn btn-sm btn-primary select-iflow-btn" data-id="${item.id}">Select iFlow & Generate Tests</button>
-                </div>
-            `).join("");
-        }
-
-        if (iflowPickerModal) iflowPickerModal.classList.add("active");
-
-        document.querySelectorAll(".select-iflow-btn").forEach(btn => {
-            btn.addEventListener("click", async () => {
-                const iflowId = btn.getAttribute("data-id");
-                if (iflowPickerModal) iflowPickerModal.classList.remove("active");
-                if (btnSampleiFlow) btnSampleiFlow.innerText = "Fetching iFlow...";
-                try {
-                    const res = await fetch(`/api/v1/cpi/fetch-iflow/${iflowId}`);
-                    if (res.ok) {
-                        currentIFlow = await res.json();
-                        await onIFlowLoaded(currentIFlow);
-                    }
-                } catch (err) {
-                    alert("Error fetching iFlow: " + err.message);
-                } finally {
-                    if (btnSampleiFlow) btnSampleiFlow.innerHTML = "<span>📦</span> Load Sample iFlow";
-                }
-            });
-        });
-    }
-
-    // --- AI Test Suite Generation Logic ---
-    if (btnGenerateTests) {
-        btnGenerateTests.addEventListener("click", async () => {
-            if (!currentIFlow) { alert("Please load an iFlow package first in Step 1!"); switchTab("tab-import"); return; }
-            await generateTestSuiteInternal(currentIFlow);
-        });
-    }
-
-    async function generateTestSuiteInternal(iflowMeta) {
-        if (btnGenerateTests) {
-            btnGenerateTests.disabled = true;
-            btnGenerateTests.innerHTML = "<span>✨</span> Synthesizing Test Cases...";
-        }
-        try {
-            const res = await fetch("/api/v1/testsuite/generate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ iflow_metadata: iflowMeta, num_cases_per_category: 1 })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                currentTestCases = data.test_cases;
-                renderTestCaseList(currentTestCases);
-                renderMockRoutes(currentTestCases);
-            }
-        } catch (err) {
-            console.error("Error generating test suite:", err);
-        } finally {
-            if (btnGenerateTests) {
-                btnGenerateTests.disabled = false;
-                btnGenerateTests.innerHTML = "<span>✨</span> Generate AI Tests";
-            }
-        }
-    }
-
-    function renderTestCaseList(cases) {
-        const countBadge = document.getElementById("testCaseCount");
-        if (countBadge) countBadge.innerText = `${cases.length} Cases`;
-        
-        const listEl = document.getElementById("testCaseList");
-        if (!listEl) return;
-
-        listEl.innerHTML = cases.map((c, idx) => {
-            const tagClass = c.category === "happy_path" ? "tag-happy" : (c.category === "boundary" ? "tag-boundary" : "tag-negative");
-            const resultBadge = c.last_result ? 
-                `<span class="badge" style="${c.last_result.status === 'PASS' ? 'color: var(--success); background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.2);' : 'color: var(--danger); background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2);'}">${c.last_result.status} (${c.last_result.status_code}) ${c.last_result.execution_time_ms}ms</span>` 
-                : `<span class="badge" style="font-size: 0.68rem;">Ready</span>`;
-
-            return `
-                <div class="test-item ${idx === 0 ? 'selected' : ''}" data-idx="${idx}" id="test-item-${c.id}">
-                    <div class="test-item-header">
-                        <div class="test-item-title">[${c.id}] ${c.name}</div>
-                    </div>
-                    <div class="test-item-meta">
-                        <span class="${tagClass}">${c.category.toUpperCase()}</span>
-                        <span>Expected HTTP ${c.expected_status}</span>
-                    </div>
-                    <div class="test-item-footer">
-                        <div id="test-result-badge-${c.id}">${resultBadge}</div>
-                        <button class="btn btn-run-single" onclick="window.runSingleTestFromList('${c.id}', event)">
-                            ▶ Run Test
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join("");
-
-        document.querySelectorAll(".test-item").forEach(item => {
-            item.addEventListener("click", (e) => {
-                if (e.target.tagName === "BUTTON") return;
-                document.querySelectorAll(".test-item").forEach(i => i.classList.remove("selected"));
-                item.classList.add("selected");
-                const idx = parseInt(item.getAttribute("data-idx"));
-                if (cases[idx]) selectTestCase(cases[idx]);
-            });
-        });
-
-        if (cases.length) selectTestCase(cases[0]);
-    }
-
-    window.runSingleTestFromList = async function(testId, event) {
-        if (event) event.stopPropagation();
-        const tc = currentTestCases.find(c => c.id === testId);
-        if (!tc) return;
-
-        const tcItem = document.getElementById(`test-item-${testId}`);
-        const badgeEl = document.getElementById(`test-result-badge-${testId}`);
-        if (tcItem) {
-            document.querySelectorAll(".test-item").forEach(i => i.classList.remove("selected"));
-            tcItem.classList.add("selected");
-            selectTestCase(tc);
-        }
-
-        if (badgeEl) badgeEl.innerHTML = `<span class="badge" style="color: var(--accent-cyan);">Running...</span>`;
-
-        const report = await executeTestSuiteInternal([tc]);
-        if (report && report.results && report.results.length) {
-            const res = report.results[0];
-            tc.last_result = res;
-            const isPass = res.status === "PASS";
-            if (badgeEl) {
-                badgeEl.innerHTML = `<span class="badge" style="${isPass ? 'color: var(--success); background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.25);' : 'color: var(--danger); background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25);'}">${res.status} HTTP ${res.status_code} (${res.execution_time_ms}ms)</span>`;
-            }
-            selectTestCase(tc);
-            fetchInterceptedLogs();
-        }
-    };
-
-    function selectTestCase(tc) {
-        selectedTestCase = tc;
-        const nameEl = document.getElementById("selectedTestName");
-        const catEl = document.getElementById("selectedTestCategory");
-        if (nameEl) nameEl.innerText = `[${tc.id}] ${tc.name}`;
-        if (catEl) catEl.innerText = tc.category.toUpperCase();
-
-        const editorVal = document.getElementById("payloadEditor") ? document.getElementById("payloadEditor").value : tc.payload;
-        if (selectedTestCase) selectedTestCase.payload = editorVal;
-
-        let resultSection = "";
-        if (tc.last_result) {
-            const r = tc.last_result;
-            const isPass = r.status === "PASS";
-            const statusColor = isPass ? "color: var(--success);" : "color: var(--danger);";
-            resultSection = `
-                <div style="margin-top: 1rem; padding: 0.85rem; background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                        <strong style="font-size: 0.82rem; ${statusColor}">Latest Live Run Result: ${r.status} (HTTP ${r.status_code})</strong>
-                        <span style="font-size: 0.74rem; color: var(--text-muted);">${r.execution_time_ms} ms</span>
-                    </div>
-                    <div style="font-size: 0.78rem; font-family: var(--font-mono); color: var(--accent-cyan); margin-bottom: 0.4rem;">
-                        SAP MPL ID: ${r.cpi_mpl_id || 'N/A'}
-                    </div>
-                    <div style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.4rem;">Response Body:</div>
-                    <pre style="background: rgba(0,0,0,0.4); padding: 0.6rem; border-radius: 4px; font-size: 0.76rem; max-height: 140px; overflow-y: auto; color: #fff;">${r.actual_response || '(Empty Response)'}</pre>
-                </div>
-            `;
-        }
-
-        const detailBody = document.getElementById("testDetailBody");
-        if (detailBody) {
-            detailBody.innerHTML = `
-                <div>
-                    <strong style="font-size: 0.78rem; color: var(--text-muted);">Description:</strong>
-                    <p style="font-size: 0.82rem; color: #fff; margin-top: 0.15rem;">${tc.description}</p>
-                </div>
-                <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                        <strong style="font-size: 0.78rem; color: var(--text-muted);">Payload (${tc.payload_type}):</strong>
-                        <button class="btn btn-sm btn-run-single" onclick="window.runSingleTestFromList('${tc.id}', event)">▶ Run Test Case</button>
-                    </div>
-                    <textarea class="code-editor" id="payloadEditor">${tc.payload}</textarea>
-                </div>
-                ${resultSection}
-            `;
-
-            const pEd = document.getElementById("payloadEditor");
-            if (pEd) {
-                pEd.addEventListener("input", (e) => {
-                    tc.payload = e.target.value;
-                });
-            }
-        }
-    }
-
-    function renderMockRoutes(cases) {
-        const routesList = document.getElementById("mockRoutesList");
-        if (!routesList) return;
-        let allRules = [];
-        cases.forEach(c => { if (c.mock_rules) allRules.push(...c.mock_rules); });
-        if (!allRules.length) { routesList.innerHTML = `<p class="text-muted" style="font-size: 0.82rem;">No mock rules active.</p>`; return; }
-
-        routesList.innerHTML = allRules.map(r => `
-            <div style="padding: 0.55rem 0.75rem; background: rgba(255,255,255,0.02); border-radius: 6px; margin-bottom: 0.45rem; border: 1px solid var(--border-color);">
-                <strong style="color: #818cf8; font-size: 0.82rem;">/mock/${r.receiver_name}</strong>
-                <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 0.15rem;">Returns HTTP ${r.response_status}</div>
-            </div>
-        `).join("");
-    }
-
-    async function executeTestSuiteInternal(testCasesToRun) {
-        const endpointValue = targetCpiEndpoint ? targetCpiEndpoint.value.trim() : "";
-        const finalEndpoint = isSimMode ? "/mock/simulated_cpi_inbound" : (endpointValue || "https://cpi-gtxsss73.it-cpitrial03-rt.cfapps.ap21.hana.ondemand.com/http/horizon");
-
-        let reqPayload = {
-            cpi_endpoint: finalEndpoint,
-            test_cases: testCasesToRun,
-            enable_mpl_check: true,
-            runtime_auth_type: runtimeAuthType ? runtimeAuthType.value : "oauth2"
-        };
-
-        const rtRaw = itRtServiceKeyJson ? itRtServiceKeyJson.value.trim() : "";
-        if (rtRaw) {
-            try {
-                const parsed = JSON.parse(rtRaw);
-                const ext = extractServiceKeyFields(parsed);
-                reqPayload.credentials = {
-                    client_id: ext.clientId,
-                    client_secret: ext.clientSecret,
-                    token_url: ext.tokenUrl,
-                    tenant_url: ext.hostUrl
-                };
-                if (ext.hostUrl && targetCpiEndpoint) {
-                    const rtHost = ext.hostUrl.replace(/\/$/, '');
-                    const relPath = extractRelativePath(targetCpiEndpoint.value || parsedInboundPath);
-                    targetCpiEndpoint.value = `${rtHost}${relPath}`;
-                    if (!isSimMode) {
-                        reqPayload.cpi_endpoint = targetCpiEndpoint.value;
-                    }
-                }
-            } catch (e) {
-                alert("Invalid JSON in Runtime Service Key (it-rt) box.");
-                return null;
-            }
-        }
-
-        try {
-            const res = await fetch("/api/v1/testsuite/run", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(reqPayload)
-            });
-
-            if (res.ok) {
-                const report = await res.json();
-                return report;
-            }
-        } catch (err) {
-            alert("Execution error: " + err.message);
-        }
-        return null;
-    }
-
-    // --- Execute Full Test Suite ---
-    if (btnRunSuite) {
-        btnRunSuite.addEventListener("click", async () => {
-            if (!currentTestCases.length) {
-                alert("No test cases to run! Generate AI test cases first.");
-                switchTab("tab-test-studio");
-                return;
-            }
-
-            btnRunSuite.disabled = true;
-            btnRunSuite.innerHTML = `<span>⚡</span> Executing Suite on ${isSimMode ? 'Simulation' : 'Live CPI'}...`;
-
-            try {
-                const report = await executeTestSuiteInternal(currentTestCases);
-                if (report && report.results) {
-                    lastReport = report;
-                    report.results.forEach(r => {
-                        const matchedTc = currentTestCases.find(c => c.id === r.test_id);
-                        if (matchedTc) matchedTc.last_result = r;
-                    });
-                    renderTestCaseList(currentTestCases);
-                    fetchInterceptedLogs();
-                }
-            } catch (err) {
-                alert("Execution error: " + err.message);
-            } finally {
-                btnRunSuite.disabled = false;
-                btnRunSuite.innerHTML = "<span>⚡</span> Execute Full Suite";
-            }
-        });
-    }
-
-    if (btnRefreshIntercepts) btnRefreshIntercepts.addEventListener("click", fetchInterceptedLogs);
-    if (btnClearMocks) {
-        btnClearMocks.addEventListener("click", async () => {
-            await fetch("/api/v1/mock/clear", { method: "POST" });
-            fetchInterceptedLogs();
-        });
-    }
-
-    async function fetchInterceptedLogs() {
-        try {
-            const res = await fetch("/api/v1/mock/intercepts");
-            if (res.ok) {
-                const data = await res.json();
-                const container = document.getElementById("interceptsLog");
-                if (!container) return;
-                if (!data.intercepts.length) {
-                    container.innerHTML = `<div class="empty-state"><p>No outbound calls intercepted yet.</p></div>`;
-                    return;
-                }
-                container.innerHTML = data.intercepts.map(i => `
-                    <div style="font-family: var(--font-mono); font-size: 0.75rem; border-bottom: 1px solid var(--border-color); padding: 0.5rem 0;">
-                        <span style="color: var(--accent-cyan);">[${i.method}]</span> 
-                        <strong style="color: #fff;">${i.receiver_name}</strong> (${i.path})
-                        <pre style="margin-top: 0.3rem; color: var(--text-muted);">${i.body}</pre>
-                    </div>
-                `).join("");
-            }
-        } catch (err) {}
-    }
+  function escapeHtml(str) {
+    if (!str) return "";
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
 });

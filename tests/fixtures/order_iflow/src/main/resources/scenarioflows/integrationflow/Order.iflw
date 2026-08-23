@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn2:definitions xmlns:bpmn2="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:ifl="urn:sap:iflow">
+  <bpmn2:process id="Order_Process" name="Order Intake">
+    <bpmn2:startEvent id="start" name="HTTPS Sender">
+      <bpmn2:extensionElements><ifl:property key="senderAdapter" value="HTTP"/></bpmn2:extensionElements>
+    </bpmn2:startEvent>
+    <bpmn2:callActivity id="modifier" name="Set Context">
+      <bpmn2:extensionElements>
+        <ifl:property key="componentType" value="Content Modifier"/>
+        <ifl:property key="customerHeader" value="${header.X-Customer-ID}"/>
+        <ifl:property key="environment" value="${property.Environment}"/>
+      </bpmn2:extensionElements>
+    </bpmn2:callActivity>
+    <bpmn2:exclusiveGateway id="route" name="Order Router"/>
+    <bpmn2:callActivity id="receiver" name="SFTP Receiver">
+      <bpmn2:extensionElements><ifl:property key="receiverAdapter" value="SFTP"/></bpmn2:extensionElements>
+    </bpmn2:callActivity>
+    <bpmn2:endEvent id="end" name="End"/>
+    <bpmn2:sequenceFlow id="f1" sourceRef="start" targetRef="modifier"/>
+    <bpmn2:sequenceFlow id="f2" sourceRef="modifier" targetRef="route"/>
+    <bpmn2:sequenceFlow id="f3" name="Positive orders" sourceRef="route" targetRef="receiver">
+      <bpmn2:conditionExpression>${property.Environment} = 'TEST'</bpmn2:conditionExpression>
+    </bpmn2:sequenceFlow>
+    <bpmn2:sequenceFlow id="f4" sourceRef="receiver" targetRef="end"/>
+  </bpmn2:process>
+</bpmn2:definitions>
+

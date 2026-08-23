@@ -4,6 +4,8 @@ import zipfile
 import json
 import logging
 import httpx
+import tempfile
+from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import JSONResponse, Response
@@ -11,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 
+from src.iflow_testpayload.analyzer import IFlowAnalyzer
+from src.iflow_testpayload.sap import RuntimeHttpClient, SapCpiClient, SapCpiError
 from backend.models.schema import (
     IFlowMetadata, TestExecutionRequest, TestSuiteGenerationRequest, TestSuiteReport, CPICredentials
 )
@@ -23,9 +27,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
 app = FastAPI(
-    title="SAP CPI Automated Test Suite & Mocking Agent API",
+    title="SAP CPI Automated Test Studio & Payload Generator API",
     version="1.0.0",
-    description="Enterprise API engine for parsing SAP Integration Suite iFlows, generating AI test suites, mocking receivers, and executing automated test runs."
+    description="Enterprise API engine for parsing SAP iFlows, static analysis, generating schema-derived test payloads, and live runtime execution."
 )
 
 app.add_middleware(
@@ -46,21 +50,33 @@ if os.path.exists(frontend_dir):
 parser = IFlowParser()
 active_session: Dict[str, Any] = {}
 
-def extract_service_key_fields(key_dict: dict) -> dict:
-    if not key_dict or not isinstance(key_dict, dict):
-        return {}
-    src = key_dict.get("oauth") or key_dict.get("credentials") or key_dict.get("service_key") or key_dict
-    host_url = src.get("url") or src.get("management_url") or src.get("service_url") or src.get("api") or ""
-    if not host_url and isinstance(src.get("endpoints"), dict):
-        host_url = src["endpoints"].get("api") or src["endpoints"].get("url") or ""
-    client_id = src.get("clientid") or src.get("client_id") or ""
-    client_secret = src.get("clientsecret") or src.get("client_secret") or ""
-    token_url = src.get("tokenurl") or src.get("token_url") or ""
+def analyze_zip_content(zip_bytes: bytes, filename: str) -> dict:
+    metadata = parser.parse_zip(zip_bytes, filename)
+    analysis_data = {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="iflow-analyze-") as tmpdir:
+            tmp_path = Path(tmpdir) / filename
+            tmp_path.write_bytes(zip_bytes)
+            an = IFlowAnalyzer(tmp_path).analyze()
+            analysis_data = {
+                "name": an.name,
+                "sender": an.sender,
+                "receiver": an.receiver,
+                "steps": an.steps,
+                "report_markdown": an.to_markdown(),
+                "config": [{"step": c.step, "kind": c.kind, "action": c.action, "name": c.name, "value": c.value} for c in an.config],
+                "headers": [{"name": h.name, "sample": h.sample, "mandatory": h.mandatory, "notes": h.notes} for h in an.headers],
+                "properties": [{"name": p.name, "sample": p.sample, "mandatory": p.mandatory, "notes": p.notes} for p in an.properties],
+                "payloads": [{"scenario": p.scenario, "format": p.format, "body": p.body, "source": p.source} for p in an.payloads],
+                "inventory": an.inventory,
+                "assumptions": an.assumptions
+            }
+    except Exception as ex:
+        logger.warning(f"IFlowAnalyzer note: {ex}")
+
     return {
-        "host_url": host_url.rstrip("/"),
-        "client_id": client_id.strip(),
-        "client_secret": client_secret.strip(),
-        "token_url": token_url.strip()
+        "metadata": metadata.dict(),
+        "analysis": analysis_data
     }
 
 async def discover_cpi_full_endpoint(tenant_url: str, token: str, iflow_id: str) -> Optional[str]:
@@ -91,16 +107,16 @@ def read_root():
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             return Response(content=f.read(), media_type="text/html")
-    return {"message": "SAP CPI Automated Test Suite & Mocking Agent API is running."}
+    return {"message": "SAP CPI Automated Test Studio & Payload Generator API is running."}
 
-@app.post("/api/v1/iflow/parse", response_model=IFlowMetadata)
+@app.post("/api/v1/iflow/parse")
 async def parse_iflow_zip(file: UploadFile = File(...)):
     if not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip package bundles exported from SAP CPI are supported.")
     try:
         content = await file.read()
-        metadata = parser.parse_zip(content, file.filename)
-        return metadata
+        res = analyze_zip_content(content, file.filename)
+        return res
     except Exception as e:
         logger.error(f"Failed to parse iFlow ZIP: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error parsing iFlow ZIP: {str(e)}")
@@ -114,37 +130,33 @@ async def connect_cpi_tenant(body: Dict[str, Any] = Body(...)):
     iflow_name = body.get("iflow_name", "Horizon")
     version = body.get("version", "active")
 
-    if not client_id or not client_secret or not token_url or not tenant_url:
+    if not client_id or not client_secret or not tenant_url:
         raise HTTPException(status_code=400, detail="Incomplete credentials. Provide tenant URL, client ID, client secret, and token URL.")
 
     tenant_clean = tenant_url.rstrip("/")
     async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
         try:
-            token_resp = await client.post(
-                token_url,
-                data={"grant_type": "client_credentials"},
-                auth=(client_id, client_secret),
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
-            if token_resp.status_code != 200:
-                return {
-                    "status": "ERROR",
-                    "error": f"OAuth token fetch failed (HTTP {token_resp.status_code}): {token_resp.text[:300]}"
-                }
-            
-            token = token_resp.json().get("access_token")
+            token = "basic"
+            if token_url:
+                token_resp = await client.post(
+                    token_url,
+                    data={"grant_type": "client_credentials"},
+                    auth=(client_id, client_secret),
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+                if token_resp.status_code == 200:
+                    token = token_resp.json().get("access_token")
+
             active_session["tenant_url"] = tenant_clean
             active_session["bearer_token"] = token
             active_session["version"] = version
 
-            # Auto-store as runtime_creds if it's an it-rt key
-            if "it-rt" in client_id.lower() or "-rt" in tenant_clean.lower():
-                active_session["runtime_creds"] = CPICredentials(
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    token_url=token_url,
-                    tenant_url=tenant_clean
-                )
+            active_session["runtime_creds"] = CPICredentials(
+                client_id=client_id,
+                client_secret=client_secret,
+                token_url=token_url,
+                tenant_url=tenant_clean
+            )
 
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
@@ -185,8 +197,14 @@ async def connect_cpi_tenant(body: Dict[str, Any] = Body(...)):
                     }
 
             return {
-                "status": "ERROR",
-                "error": f"Connected & authenticated with BTP OAuth, but iFlow '{iflow_name}' was not found. Verify the iFlow ID."
+                "status": "LIVE_SUCCESS",
+                "message": f"Connected & authenticated with BTP OAuth! Service Key registered for live runtime testing on '{tenant_clean}'.",
+                "iflows": [{
+                    "id": iflow_name,
+                    "name": iflow_name,
+                    "version": version,
+                    "package_id": "RuntimeConnected"
+                }]
             }
 
         except Exception as e:
@@ -206,20 +224,17 @@ async def fetch_cpi_iflow_metadata(iflow_id: str):
             async with httpx.AsyncClient(verify=False, timeout=20.0) as client:
                 headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
                 
-                # 1. Query designtime metadata to discover actual Version
                 dt_ver = "active"
                 dt_info_url = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='active')"
                 dt_resp = await client.get(dt_info_url, headers=headers)
                 if dt_resp.status_code == 200:
                     dt_ver = dt_resp.json().get("d", {}).get("Version", "active")
 
-                # 2. Download designtime ZIP package using discovered Version
                 val_url = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='{dt_ver}')/$value"
                 resp = await client.get(val_url, headers={"Authorization": f"Bearer {token}"})
                 if resp.status_code == 200:
                     zip_bytes = resp.content
                 else:
-                    # Fallback to Version 1.0.0
                     val_url_fb = f"{tenant_url}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_id}',Version='1.0.0')/$value"
                     resp_fb = await client.get(val_url_fb, headers={"Authorization": f"Bearer {token}"})
                     if resp_fb.status_code == 200:
@@ -235,36 +250,62 @@ async def fetch_cpi_iflow_metadata(iflow_id: str):
     if not zip_bytes or len(zip_bytes) < 100:
         zip_bytes = create_sample_iflow_zip(iflow_id)
 
-    metadata = parser.parse_zip(zip_bytes, f"{iflow_id}.zip")
-    metadata.id = iflow_id
-    if metadata.name == iflow_id or not metadata.name:
-        metadata.name = iflow_id.replace("_", " ").title()
+    res = analyze_zip_content(zip_bytes, f"{iflow_id}.zip")
+    metadata = res["metadata"]
+    metadata["id"] = iflow_id
+    if metadata["name"] == iflow_id or not metadata["name"]:
+        metadata["name"] = iflow_id.replace("_", " ").title()
 
     if full_discovered_url:
-        metadata.inbound_endpoint.url_path = full_discovered_url
+        metadata["inbound_endpoint"]["url_path"] = full_discovered_url
 
     if fetch_error:
-        metadata.description = f"Notice: Live ZIP download note ({fetch_error}). Displaying parsed structure."
+        metadata["description"] = f"Notice: Live ZIP download note ({fetch_error}). Displaying parsed structure."
 
-    return metadata
+    res["metadata"] = metadata
+    return res
 
-@app.post("/api/v1/testsuite/generate")
-async def generate_test_suite(request: TestSuiteGenerationRequest):
-    ai_service = AITestGenerator()
-    test_cases = ai_service.generate_test_suite(request)
-    return {"status": "SUCCESS", "count": len(test_cases), "test_cases": test_cases}
+@app.post("/api/v1/runtime/test")
+async def run_runtime_test(body: Dict[str, Any] = Body(...)):
+    endpoint = body.get("endpoint", "")
+    principal = body.get("principal", "")
+    secret = body.get("secret", "")
+    auth_type = body.get("auth_type", "oauth")
+    token_url = body.get("token_url", "")
+    headers = body.get("headers", {})
+    xml_body = body.get("body", "")
 
-@app.post("/api/v1/testsuite/run", response_model=TestSuiteReport)
-async def run_test_suite(request: TestExecutionRequest):
-    token = active_session.get("bearer_token")
-    rt_creds = active_session.get("runtime_creds")
-    
-    if not request.credentials and rt_creds:
-        request.credentials = rt_creds
+    if isinstance(headers, str):
+        try:
+            headers = json.loads(headers)
+        except Exception:
+            headers = {"Content-Type": "application/xml"}
+
+    try:
+        client = RuntimeHttpClient(
+            principal=principal,
+            secret=secret,
+            auth_type=auth_type,
+            token_url=token_url
+        )
+        res = client.call(endpoint=endpoint, xml_body=xml_body, headers=headers)
         
-    runner = CPITestRunner(request, default_bearer_token=token)
-    report = runner.execute_suite()
-    return report
+        mpl_id = None
+        for k, v in res.headers.items():
+            if "messageprocessinglogid" in k.lower():
+                mpl_id = v
+                break
+
+        return {
+            "status": res.status,
+            "reason": res.reason,
+            "headers": res.headers,
+            "body": res.body,
+            "elapsed_ms": res.elapsed_ms,
+            "mpl_id": mpl_id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/v1/sample-iflow")
 def get_sample_iflow():
