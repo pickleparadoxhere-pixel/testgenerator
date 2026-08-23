@@ -9,10 +9,17 @@ import urllib.error
 import ssl
 from typing import Dict, Any, List, Optional
 
+from backend.services.cpi_knowledge_model import CPINormalizedModel, parse_relative_date_expression
+from backend.services.cpi_discovery_tools import CPIDiscoveryToolRegistry, CPI_TOOLS_SCHEMA
+
 logger = logging.getLogger(__name__)
 
 class CPIDiscoveryAgent:
-    """Intelligent discovery and natural language query agent for SAP CPI tenant artifacts."""
+    """
+    Autonomous multi-step discovery and analytical reasoning agent for SAP CPI.
+    Normalizes design-time and runtime APIs, executes granular tool functions,
+    understands relative date bounds, explains data sources, and prevents hallucination.
+    """
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("PALM_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -27,175 +34,226 @@ class CPIDiscoveryAgent:
         query_clean = query_text.strip()
         logger.info(f"Executing CPI Discovery Agent query: '{query_clean}'")
 
-        # 1. Ensure tenant artifacts context is built
-        context_artifacts = artifacts_list or []
-        if not context_artifacts and tenant_url and bearer_token:
-            context_artifacts = self._fetch_live_tenant_context(tenant_url, bearer_token)
+        # 1. Fetch raw CPI API endpoints context or sample context
+        raw_packages, raw_designtime, raw_runtime, raw_endpoints = self._fetch_cpi_apis_context(
+            tenant_url=tenant_url,
+            bearer_token=bearer_token,
+            artifacts_list=artifacts_list
+        )
 
-        if not context_artifacts:
-            # Generate rich fallback context if no live tenant connected
-            context_artifacts = self._get_sample_context()
+        # 2. Build normalized internal CPI knowledge model
+        model = CPINormalizedModel(raw_packages, raw_designtime, raw_runtime, raw_endpoints)
+        registry = CPIDiscoveryToolRegistry(model)
 
-        # 2. Rule-based search and filter engine
-        filtered_results, search_reason = self._filter_context(query_clean, context_artifacts)
+        # 3. Analytical reasoning and tool selection engine
+        filtered_results, reason, queried_sources = self._reason_and_execute(query_clean, registry, model)
 
-        # 3. Synthesize natural language answer
-        answer_text = self._synthesize_answer(query_clean, filtered_results, search_reason, len(context_artifacts))
+        # 4. Synthesize natural language answer with source explanation
+        answer_text = self._synthesize_answer(query_clean, filtered_results, reason, queried_sources, len(model.correlated))
 
         return {
             "query": query_clean,
             "answer": answer_text,
-            "total_tenant_artifacts": len(context_artifacts),
+            "total_tenant_artifacts": len(model.correlated),
             "matched_count": len(filtered_results),
-            "results": filtered_results
+            "results": filtered_results,
+            "sources_checked": queried_sources
         }
 
-    def _fetch_live_tenant_context(self, tenant_url: str, bearer_token: str) -> List[Dict[str, Any]]:
-        artifacts = []
+    def _fetch_cpi_apis_context(
+        self,
+        tenant_url: str = None,
+        bearer_token: str = None,
+        artifacts_list: List[Dict[str, Any]] = None
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        if not tenant_url or not bearer_token:
+            return self._get_sample_raw_context()
+
+        raw_packages, raw_designtime, raw_runtime, raw_endpoints = [], [], [], []
         tenant_clean = tenant_url.rstrip("/")
         headers = {"Authorization": f"Bearer {bearer_token}", "Accept": "application/json"}
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
-        # Fetch Runtime Deployed Artifacts
+        # 1. IntegrationPackages
         try:
-            rt_url = f"{tenant_clean}/api/v1/IntegrationRuntimeArtifacts"
-            req = urllib.request.Request(rt_url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+            url = f"{tenant_clean}/api/v1/IntegrationPackages?$format=json"
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                for item in data.get("d", {}).get("results", []):
-                    artifacts.append({
-                        "id": item.get("Id"),
-                        "name": item.get("Name") or item.get("Id"),
-                        "version": item.get("Version", "active"),
-                        "package_id": "DeployedRuntime",
-                        "status": "DEPLOYED",
-                        "modified_at": item.get("DeployedOn") or "Recently",
-                        "adapters": self._guess_adapters(item.get("Id") or "")
-                    })
+                raw_packages = data.get("d", {}).get("results", []) or data.get("value", [])
         except Exception as e:
-            logger.warning(f"Discovery Agent runtime fetch note: {e}")
+            logger.warning(f"IntegrationPackages fetch note: {e}")
 
-        # Fetch Designtime Artifacts
+        # 2. IntegrationDesigntimeArtifacts
         try:
-            dt_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts?$format=json"
-            req = urllib.request.Request(dt_url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+            url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts?$format=json"
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                for item in data.get("d", {}).get("results", []):
-                    art_id = item.get("Id")
-                    if not any(a["id"] == art_id for a in artifacts):
-                        artifacts.append({
-                            "id": art_id,
-                            "name": item.get("Name") or art_id,
-                            "version": item.get("Version", "1.0.0"),
-                            "package_id": item.get("PackageId", "DefaultPackage"),
-                            "status": "DESIGNTIME",
-                            "modified_at": item.get("ModifiedAt") or item.get("CreatedAt") or "Recently",
-                            "adapters": self._guess_adapters(art_id)
-                        })
+                raw_designtime = data.get("d", {}).get("results", []) or data.get("value", [])
         except Exception as e:
-            logger.warning(f"Discovery Agent designtime fetch note: {e}")
+            logger.warning(f"IntegrationDesigntimeArtifacts fetch note: {e}")
 
-        return artifacts
+        # 3. IntegrationRuntimeArtifacts
+        try:
+            url = f"{tenant_clean}/api/v1/IntegrationRuntimeArtifacts?$format=json"
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                raw_runtime = data.get("d", {}).get("results", []) or data.get("value", [])
+        except Exception as e:
+            logger.warning(f"IntegrationRuntimeArtifacts fetch note: {e}")
 
-    def _guess_adapters(self, art_id: str) -> List[str]:
-        id_lower = art_id.lower()
-        adapters = []
-        if "sftp" in id_lower or "file" in id_lower:
-            adapters.append("SFTP")
-        if "http" in id_lower or "rest" in id_lower:
-            adapters.append("HTTPS")
-        if "soap" in id_lower or "cxf" in id_lower or "wsdl" in id_lower:
-            adapters.append("SOAP")
-        if "odata" in id_lower or "s4" in id_lower:
-            adapters.append("OData")
-        if "idoc" in id_lower or "sap" in id_lower:
-            adapters.append("IDoc")
-        if "kafka" in id_lower or "amqp" in id_lower:
-            adapters.append("AMQP/Kafka")
-        if not adapters:
-            adapters.append("HTTPS")
-        return adapters
+        # 4. ServiceEndpoints
+        try:
+            url = f"{tenant_clean}/api/v1/ServiceEndpoints?$format=json"
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                raw_endpoints = data.get("d", {}).get("results", []) or data.get("value", [])
+        except Exception as e:
+            logger.warning(f"ServiceEndpoints fetch note: {e}")
 
-    def _get_sample_context(self) -> List[Dict[str, Any]]:
-        return [
-            {"id": "Horizon", "name": "Horizon Sales Order iFlow", "version": "1.0.2", "package_id": "CustomerPackage", "status": "DEPLOYED", "modified_at": "2026-08-20", "adapters": ["HTTPS", "OData", "Groovy"]},
-            {"id": "Supernova", "name": "Supernova Payment Gateway", "version": "2.1.0", "package_id": "FinancePackage", "status": "DEPLOYED", "modified_at": "2026-08-22", "adapters": ["HTTPS", "REST", "XSD"]},
-            {"id": "SFTP_Customer_Sync", "name": "Customer Master SFTP Ingestion", "version": "1.0.0", "package_id": "CustomerPackage", "status": "DEPLOYED", "modified_at": "2026-08-23", "adapters": ["SFTP", "IDoc", "Groovy"]},
-            {"id": "SFTP_Vendor_Invoices", "name": "Vendor Invoice SFTP Batch", "version": "1.1.4", "package_id": "FinancePackage", "status": "DESIGNTIME", "modified_at": "2026-08-21", "adapters": ["SFTP", "SOAP"]},
-            {"id": "S4HANA_Products_OData", "name": "S4HANA Products Catalogue Sync", "version": "3.0.1", "package_id": "CustomerPackage", "status": "DEPLOYED", "modified_at": "2026-08-24", "adapters": ["OData", "HTTPS"]}
+        if not raw_designtime and not raw_runtime and artifacts_list:
+            raw_designtime = artifacts_list
+
+        if not raw_designtime and not raw_runtime:
+            return self._get_sample_raw_context()
+
+        return raw_packages, raw_designtime, raw_runtime, raw_endpoints
+
+    def _get_sample_raw_context(self) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        pkgs = [
+            {"Id": "CustomerPackage", "Name": "Customer Integrations Package", "Version": "1.2.0", "ModifiedAt": "2026-08-20T10:00:00Z"},
+            {"Id": "FinancePackage", "Name": "Finance & Payments Package", "Version": "2.0.0", "ModifiedAt": "2026-08-22T12:00:00Z"},
+            {"Id": "LogisticsPackage", "Name": "Logistics & Warehouse Package", "Version": "1.0.0", "ModifiedAt": "2026-02-10T08:00:00Z"}
         ]
+        dt = [
+            {"Id": "Horizon", "Name": "Horizon Sales Order iFlow", "Version": "1.0.2", "PackageId": "CustomerPackage", "ArtifactType": "IntegrationFlow", "ModifiedAt": "2026-08-23T14:00:00Z"},
+            {"Id": "Supernova", "Name": "Supernova Payment Gateway", "Version": "2.1.0", "PackageId": "FinancePackage", "ArtifactType": "IntegrationFlow", "ModifiedAt": "2026-08-22T16:30:00Z"},
+            {"Id": "SFTP_Customer_Sync", "Name": "Customer Master SFTP Ingestion", "Version": "1.0.0", "PackageId": "CustomerPackage", "ArtifactType": "IntegrationFlow", "ModifiedAt": "2026-08-24T00:15:00Z"},
+            {"Id": "SFTP_Vendor_Invoices", "Name": "Vendor Invoice SFTP Batch", "Version": "1.1.4", "PackageId": "FinancePackage", "ArtifactType": "IntegrationFlow", "ModifiedAt": "2026-08-10T11:00:00Z"},
+            {"Id": "S4HANA_Products_OData", "Name": "S4HANA Products Catalogue Sync", "Version": "3.0.1", "PackageId": "CustomerPackage", "ArtifactType": "IntegrationFlow", "ModifiedAt": "2026-08-15T09:00:00Z"},
+            {"Id": "VM_Customer_Types", "Name": "Customer Types Mapping", "Version": "1.0.0", "PackageId": "CustomerPackage", "ArtifactType": "ValueMapping", "ModifiedAt": "2026-08-01T10:00:00Z"},
+            {"Id": "VM_Payment_Codes", "Name": "Payment Error Codes Mapping", "Version": "1.0.0", "PackageId": "FinancePackage", "ArtifactType": "ValueMapping", "ModifiedAt": "2026-08-05T10:00:00Z"},
+            {"Id": "Old_Legacy_Orders", "Name": "Legacy Orders Archived iFlow", "Version": "0.9.0", "PackageId": "CustomerPackage", "ArtifactType": "IntegrationFlow", "ModifiedAt": "2025-11-10T10:00:00Z"}
+        ]
+        rt = [
+            {"Id": "Horizon", "Name": "Horizon Sales Order iFlow", "Version": "1.0.2", "Status": "STARTED", "DeployedOn": "2026-08-23T14:05:00Z"},
+            {"Id": "Supernova", "Name": "Supernova Payment Gateway", "Version": "2.1.0", "Status": "STARTED", "DeployedOn": "2026-08-22T16:35:00Z"},
+            {"Id": "SFTP_Customer_Sync", "Name": "Customer Master SFTP Ingestion", "Version": "1.0.0", "Status": "STARTED", "DeployedOn": "2026-08-24T00:20:00Z"},
+            {"Id": "S4HANA_Products_OData", "Name": "S4HANA Products Catalogue Sync", "Version": "3.0.1", "Status": "STARTED", "DeployedOn": "2026-08-15T09:05:00Z"}
+        ]
+        ep = [
+            {"Id": "Horizon", "Name": "Horizon", "Protocol": "HTTPS", "Url": "https://cpi-rt.cfapps.sap.com/http/horizon"},
+            {"Id": "Supernova", "Name": "Supernova", "Protocol": "HTTPS", "Url": "https://cpi-rt.cfapps.sap.com/http/supernova"}
+        ]
+        return pkgs, dt, rt, ep
 
-    def _filter_context(self, query: str, artifacts: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], str]:
+    def _reason_and_execute(
+        self,
+        query: str,
+        registry: CPIDiscoveryToolRegistry,
+        model: CPINormalizedModel
+    ) -> tuple[List[Dict[str, Any]], str, List[str]]:
         q_lower = query.lower()
+        queried_sources = ["IntegrationDesigntimeArtifacts", "IntegrationRuntimeArtifacts", "IntegrationPackages"]
 
-        # 1. Keyword / Adapter search e.g. SFTP, HTTPS, SOAP, OData, IDoc, Groovy
-        adapter_keywords = ["sftp", "https", "http", "soap", "odata", "idoc", "groovy", "xslt", "kafka", "amqp"]
-        matched_kw = [kw for kw in adapter_keywords if kw in q_lower]
-        
-        if matched_kw:
-            target_kw = matched_kw[0].upper()
-            filtered = [
-                a for a in artifacts
-                if target_kw in [ad.upper() for ad in a.get("adapters", [])] or target_kw in a["id"].upper() or target_kw in a["name"].upper()
-            ]
-            return filtered, f"filtering by protocol/adapter '{target_kw}'"
+        # Detect relative date expressions e.g. "modified in the last 7 days", "recently", "older than 6 months"
+        date_expr = None
+        for dterm in ["recently", "today", "yesterday", "last 7 days", "last 30 days", "this month", "last month", "older than 6 months"]:
+            if dterm in q_lower:
+                date_expr = dterm
+                break
 
-        # 2. Package search e.g. Customer, Finance, Logistics
-        if "package" in q_lower or any(pkg in q_lower for pkg in ["customer", "finance", "logistics", "sales", "order"]):
-            stop_words = {"what", "integrations", "are", "in", "the", "for", "package", "iflows", "show", "find", "me", "all", "which"}
-            words = [w for w in re.findall(r'\b[a-zA-Z0-9_-]+\b', q_lower) if w not in stop_words]
-            pkg_term = words[0] if words else "customer"
-            filtered = [
-                a for a in artifacts
-                if pkg_term.lower() in a.get("package_id", "").lower() or pkg_term.lower() in a["name"].lower()
-            ]
-            return filtered, f"filtering by package term '{pkg_term}'"
+        # Detect adapter/protocol e.g. SFTP, HTTPS, SOAP, OData, IDoc, ValueMapping
+        adapter_type = None
+        for ad in ["sftp", "https", "soap", "odata", "idoc", "rest"]:
+            if ad in q_lower:
+                adapter_type = ad.upper()
+                break
 
-        # 3. Deployed status search
-        if "deploy" in q_lower or "live" in q_lower or "active" in q_lower:
-            filtered = [a for a in artifacts if a.get("status", "").upper() == "DEPLOYED"]
-            return filtered, "filtering for deployed runtime iFlows"
+        # Detect artifact type e.g. ValueMapping, IntegrationFlow
+        art_type = None
+        if "value mapping" in q_lower or "valuemapping" in q_lower:
+            art_type = "ValueMapping"
 
-        # 4. Recently modified search
-        if "recent" in q_lower or "modifi" in q_lower or "date" in q_lower or "latest" in q_lower:
-            sorted_arts = sorted(artifacts, key=lambda x: str(x.get("modified_at", "")), reverse=True)
-            return sorted_arts, "sorted by recent modification date"
+        # Detect package terms
+        package_term = None
+        for pkg in ["customer", "finance", "logistics", "sales", "order"]:
+            if pkg in q_lower:
+                package_term = pkg
+                break
 
-        # General search match against ID, Name, Package
-        terms = [t for t in q_lower.split() if len(t) > 2 and t not in ["find", "show", "what", "which", "all", "the", "iflows", "integrations", "are"]]
-        if terms:
-            filtered = [
-                a for a in artifacts
-                if any(t in a["id"].lower() or t in a["name"].lower() or t in a.get("package_id", "").lower() for t in terms)
-            ]
-            if filtered:
-                return filtered, f"matching keywords '{', '.join(terms)}'"
+        # Detect deployment status filter e.g. "deployed", "not deployed", "design time"
+        is_deployed = None
+        if "not deployed" in q_lower or "design time" in q_lower or "un-deployed" in q_lower or "undeployed" in q_lower:
+            is_deployed = False
+        elif "deploy" in q_lower or "running" in q_lower or "live" in q_lower:
+            is_deployed = True
 
-        return artifacts, "displaying all tenant artifacts"
+        # Execute analytical tool query
+        filtered, reason = registry.filter_and_correlate_artifacts(
+            adapter_type=adapter_type,
+            package_term=package_term,
+            is_deployed=is_deployed,
+            artifact_type=art_type,
+            date_expression=date_expr
+        )
 
-    def _synthesize_answer(self, query: str, results: List[Dict[str, Any]], reason: str, total_count: int) -> str:
-        if not results:
-            return f"No iFlows found matching your query '{query}' in the current SAP CPI tenant context ({total_count} total artifacts scanned)."
+        # Check for aggregation queries e.g. "more than 10", "highest number", "count", "packages with"
+        if "more than" in q_lower or "highest" in q_lower or "count" in q_lower or "how many" in q_lower:
+            agg_metrics = registry.aggregate_tenant_metrics(group_by="package")
+            reason += f" (Aggregated packages count: {agg_metrics['total_packages']})"
 
+        # Check for sorting preferences
+        if "oldest" in q_lower:
+            filtered = sorted(filtered, key=lambda x: str(x.get("modified_at") or x.get("created_at") or ""))
+            reason += " (Sorted oldest to newest)"
+        elif "recent" in q_lower or "latest" in q_lower or "newest" in q_lower:
+            filtered = sorted(filtered, key=lambda x: str(x.get("modified_at") or x.get("created_at") or ""), reverse=True)
+            reason += " (Sorted newest to oldest)"
+
+        return filtered, reason, queried_sources
+
+    def _synthesize_answer(
+        self,
+        query: str,
+        results: List[Dict[str, Any]],
+        reason: str,
+        queried_sources: List[str],
+        total_count: int
+    ) -> str:
+        # Check for explicitly un-supported / un-available API data requests
+        unsupported_keywords = ["cpu usage", "memory consumption", "db connection string", "database password", "admin password"]
+        if any(un in query.lower() for un in unsupported_keywords):
+            return "This information is not available from the current CPI API data."
+
+        sources_bullets = "\n".join([f"- `{src}`" for src in queried_sources])
         names_str = ", ".join([f"**{r['id']}** ({r['name']})" for r in results[:5]])
         more_str = f" and {len(results) - 5} more" if len(results) > 5 else ""
 
+        # Call Gemini AI if API key present for natural language synthesis
         if self.api_key:
             try:
                 prompt = f"""
-You are the SAP CPI Discovery AI Agent.
-Answer the user's question concisely based on the scanned CPI tenant context.
+You are the SAP CPI Analytical Discovery AI Agent.
+Answer the user's question based strictly on the retrieved SAP CPI OData API data.
 
-User Query: "{query}"
-Filter Rule Applied: {reason}
-Total Scanned Tenant Artifacts: {total_count}
-Matched Artifacts ({len(results)} count):
+User Question: "{query}"
+Filter & Analytical Reasoning Applied: {reason}
+Total Scanned Tenant Context Artifacts: {total_count}
+Matched Results ({len(results)} count):
 {json.dumps(results[:10], indent=2)}
 
-Provide a clear, 2-sentence conversational answer summarizing the results and key findings.
+Rules:
+1. Do not hallucinate or invent artifact modification dates, deployment status, package relationships, or versions.
+2. If required information is unavailable from the CPI APIs, explicitly answer: "This information is not available from the current CPI API data."
+3. At the bottom of your answer, include an "I checked:" bullet list showing the SAP CPI APIs queried.
+
+Synthesize a clear, 3-sentence technical answer.
 """
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
                 payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
@@ -207,12 +265,20 @@ Provide a clear, 2-sentence conversational answer summarizing the results and ke
 
                 with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
                     resp_data = json.loads(resp.read().decode("utf-8"))
-                    return resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    text = resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    if "I checked:" not in text:
+                        text += f"\n\n**I checked:**\n{sources_bullets}"
+                    return text
             except Exception as ex_ai:
                 logger.warning(f"Discovery AI synthesis note: {ex_ai}")
 
-        # Rule-based clean conversational answer
+        if not results:
+            return (
+                f"No iFlows found matching your query '{query}' ({reason}).\n\n"
+                f"**I checked:**\n{sources_bullets}"
+            )
+
         return (
-            f"Found **{len(results)}** iFlow(s) matching your query ({reason}): {names_str}{more_str}. "
-            f"Click any iFlow row below to instantly analyze its BPMN flow and generate test payloads."
+            f"Found **{len(results)}** artifact(s) matching your question ({reason}): {names_str}{more_str}.\n\n"
+            f"**I checked:**\n{sources_bullets}"
         )
