@@ -40,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const payloadCardsList = document.getElementById("payloadCardsList");
   const reportMarkdownContainer = document.getElementById("reportMarkdownContainer");
   const btnDownloadReport = document.getElementById("btnDownloadReport");
+  const btnDownloadDocxReport = document.getElementById("btnDownloadDocxReport");
 
   // DOM Elements - Test Window
   const sectionTestWindow = document.getElementById("section-test-window");
@@ -74,6 +75,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnSaveMock = document.getElementById("btnSaveMock");
   const mockSaveStatus = document.getElementById("mockSaveStatus");
   const btnLoadSample = document.getElementById("btnLoadSample");
+
+  // DOM Elements - Section 5 Technical Specification Generator (.docx)
+  const sectionDocGen = document.getElementById("section-doc-gen");
+  const docxFileInput = document.getElementById("docxFileInput");
+  const docxFilename = document.getElementById("docxFilename");
+  const btnGenerateDocx = document.getElementById("btnGenerateDocx");
+  const docGenStatus = document.getElementById("docGenStatus");
 
   let selectedFiles = [];
 
@@ -118,7 +126,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (rtRes.clientSecret) runtimeSecret.value = rtRes.clientSecret;
         runtimeAuthType.value = rtRes.tokenUrl ? "oauth" : "basic";
 
-        // If api tenant URL wasn't filled, fill from rt URL
         if (!modalTenantUrl.value && rtRes.url) {
           modalTenantUrl.value = rtRes.url.replace("-rt.cfapps", ".cfapps");
         }
@@ -141,7 +148,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (res.clientSecret) runtimeSecret.value = res.clientSecret;
         runtimeAuthType.value = res.tokenUrl ? "oauth" : "basic";
 
-        // Derive runtime host URL & concatenate with analyzed sender adapter urlPath
         if (res.url) {
           let rtHost = res.url.replace(".it-cpitrial03.", ".it-cpitrial03-rt.").replace(/\/$/, "");
           let adapterPath = (currentMetadata && currentMetadata.inbound_endpoint && currentMetadata.inbound_endpoint.url_path) ? currentMetadata.inbound_endpoint.url_path : "";
@@ -215,11 +221,9 @@ document.addEventListener("DOMContentLoaded", () => {
           modalConnectStatus.textContent = data.message;
           activeTenantUrl = payload.tenant_url;
 
-          // Update Status Badge
           tenantStatusBadge.className = "status-pill status-connected";
           tenantStatusBadge.innerHTML = `<span class="dot"></span> Connected: ${new URL(payload.tenant_url).hostname}`;
 
-          // Render Artifacts Table
           renderArtifactsTable(data.iflows || []);
           setTimeout(() => { tenantModal.style.display = "none"; }, 1200);
         } else {
@@ -259,7 +263,6 @@ document.addEventListener("DOMContentLoaded", () => {
       liveArtifactsTbody.appendChild(tr);
     });
 
-    // Add click event for each row button
     document.querySelectorAll(".btn-fetch-art").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = e.currentTarget.getAttribute("data-id");
@@ -298,9 +301,10 @@ document.addEventListener("DOMContentLoaded", () => {
     currentAnalysis = data.analysis || {};
     generatedPayloads = currentAnalysis.payloads || [];
 
-    // Show Results & Test Window Sections
+    // Show Results, Test Window, & Technical Spec Sections
     sectionResults.style.display = "block";
     sectionTestWindow.style.display = "block";
+    if (sectionDocGen) sectionDocGen.style.display = "block";
 
     // 1. Render Test Payload Cards
     renderPayloadCards(generatedPayloads);
@@ -335,11 +339,9 @@ document.addEventListener("DOMContentLoaded", () => {
         opt.textContent = `${p.scenario} (${p.format})`;
         runtimePayloadSelect.appendChild(opt);
       });
-      // Load first payload into body
       runtimeBody.value = generatedPayloads[0].body;
     }
 
-    // Scroll to results cleanly
     sectionResults.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -369,7 +371,6 @@ document.addEventListener("DOMContentLoaded", () => {
       payloadCardsList.appendChild(card);
     });
 
-    // Copy Payload buttons
     document.querySelectorAll(".btn-copy-payload").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const idx = e.currentTarget.getAttribute("data-index");
@@ -380,7 +381,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    // Load into Runner buttons
     document.querySelectorAll(".btn-load-runner").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const idx = e.currentTarget.getAttribute("data-index");
@@ -388,6 +388,102 @@ document.addEventListener("DOMContentLoaded", () => {
         runtimeBody.value = payloads[idx].body;
         sectionTestWindow.scrollIntoView({ behavior: "smooth" });
       });
+    });
+  }
+
+  // Generate & Download Technical Specification .docx Document
+  async function downloadTechSpecDocx() {
+    if (!currentAnalysis) {
+      alert("Please select or analyze an iFlow first before generating a technical specification document.");
+      return;
+    }
+
+    if (docGenStatus) {
+      docGenStatus.className = "status-msg";
+      docGenStatus.textContent = "Generating Word (.docx) technical specification...";
+    }
+    if (btnGenerateDocx) btnGenerateDocx.disabled = true;
+    if (btnDownloadDocxReport) btnDownloadDocxReport.disabled = true;
+
+    try {
+      const formData = new FormData();
+      formData.append("analysis", JSON.stringify(currentAnalysis));
+      formData.append("metadata", JSON.stringify(currentMetadata || {}));
+
+      if (docxFileInput && docxFileInput.files && docxFileInput.files.length > 0) {
+        formData.append("template_file", docxFileInput.files[0]);
+      }
+
+      const resp = await fetch("/api/v1/doc/generate-spec", {
+        method: "POST",
+        body: formData
+      });
+
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const filename = (currentMetadata && currentMetadata.id) ? `Technical_Specification_${currentMetadata.id}.docx` : "Technical_Specification_iFlow.docx";
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+
+        if (docGenStatus) {
+          docGenStatus.className = "status-msg success";
+          docGenStatus.textContent = "Downloaded Technical Specification Word (.docx) Document!";
+        }
+      } else {
+        const err = await resp.json();
+        if (docGenStatus) {
+          docGenStatus.className = "status-msg error";
+          docGenStatus.textContent = err.error || "Failed to generate .docx document.";
+        }
+      }
+    } catch (err) {
+      if (docGenStatus) {
+        docGenStatus.className = "status-msg error";
+        docGenStatus.textContent = `Error: ${err.message}`;
+      }
+    } finally {
+      if (btnGenerateDocx) btnGenerateDocx.disabled = false;
+      if (btnDownloadDocxReport) btnDownloadDocxReport.disabled = false;
+    }
+  }
+
+  if (docxFileInput && docxFilename) {
+    docxFileInput.addEventListener("change", () => {
+      if (docxFileInput.files && docxFileInput.files.length > 0) {
+        docxFilename.textContent = `Uploaded Reference Template: ${docxFileInput.files[0].name}`;
+      } else {
+        docxFilename.textContent = "No reference template uploaded. Will use standard SAP Enterprise styling schema.";
+      }
+    });
+  }
+
+  if (btnGenerateDocx) {
+    btnGenerateDocx.addEventListener("click", downloadTechSpecDocx);
+  }
+
+  if (btnDownloadDocxReport) {
+    btnDownloadDocxReport.addEventListener("click", downloadTechSpecDocx);
+  }
+
+  if (btnDownloadReport) {
+    btnDownloadReport.addEventListener("click", () => {
+      if (!currentAnalysis || !currentAnalysis.report_markdown) return;
+      const blob = new Blob([currentAnalysis.report_markdown], { type: "text/markdown" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const filename = (currentMetadata && currentMetadata.id) ? `Analysis_Report_${currentMetadata.id}.md` : "Analysis_Report.md";
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     });
   }
 

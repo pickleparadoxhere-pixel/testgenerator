@@ -7,7 +7,7 @@ import httpx
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +22,7 @@ from backend.services.iflow_parser import IFlowParser
 from backend.services.ai_test_generator import AITestGenerator
 from backend.services.cpi_runner import CPITestRunner
 from backend.services.mock_server import mock_manager, mock_router
+from backend.services.doc_generator import TechSpecGenerator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
@@ -322,6 +323,26 @@ async def run_runtime_test(body: Dict[str, Any] = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/doc/generate-spec")
+async def generate_spec_doc(
+    analysis: Optional[str] = Form(None),
+    metadata: Optional[str] = Form(None),
+    template_file: Optional[UploadFile] = File(None)
+):
+    analysis_dict = json.loads(analysis) if analysis else {}
+    metadata_dict = json.loads(metadata) if metadata else {}
+    template_bytes = await template_file.read() if template_file else None
+
+    iflow_id = metadata_dict.get("id") or analysis_dict.get("name") or "iFlow"
+    doc_gen = TechSpecGenerator()
+    docx_bytes = doc_gen.generate_tech_spec(analysis_dict, metadata_dict, template_bytes)
+
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="Technical_Specification_{iflow_id}.docx"'}
+    )
 
 @app.get("/api/v1/sample-iflow")
 def get_sample_iflow():

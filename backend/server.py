@@ -22,6 +22,7 @@ from backend.services.iflow_parser import IFlowParser
 from backend.services.ai_test_generator import AITestGenerator
 from backend.services.cpi_runner import CPITestRunner
 from backend.services.mock_server import mock_manager
+from backend.services.doc_generator import TechSpecGenerator
 from backend.samples.sample_iflow import create_sample_iflow_zip
 from backend.models.schema import (
     IFlowMetadata, TestSuiteGenerationRequest, TestExecutionRequest,
@@ -30,6 +31,7 @@ from backend.models.schema import (
 
 parser = IFlowParser()
 ai_service = AITestGenerator()
+doc_gen = TechSpecGenerator()
 
 # Active SAP CPI session credentials
 active_cpi_creds = {}
@@ -41,6 +43,14 @@ def extract_zip_from_multipart(raw_bytes: bytes) -> bytes:
     if idx != -1:
         return raw_bytes[idx:]
     return raw_bytes
+
+def extract_docx_from_multipart(raw_bytes: bytes) -> Optional[bytes]:
+    """Locates PK signature magic bytes to extract clean DOCX bytes from multipart uploads."""
+    magic = b'PK\x03\x04'
+    idx = raw_bytes.find(magic)
+    if idx != -1:
+        return raw_bytes[idx:]
+    return None
 
 def parse_and_execute_raw_curl(curl_str: str) -> tuple[dict, str]:
     cleaned = curl_str.strip().replace("\\\n", " ").replace("\n", " ")
@@ -231,7 +241,6 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
 
             if not discovered_ep and active_cpi_creds.get("tenant_url"):
                 tenant_clean = active_cpi_creds["tenant_url"].rstrip("/")
-                # Replace management domain with runtime domain if needed
                 rt_host = tenant_clean.replace(".it-cpitrial03.", ".it-cpitrial03-rt.") if ".it-cpitrial03." in tenant_clean else tenant_clean
                 adapter_path = metadata_dict.get("inbound_endpoint", {}).get("url_path", f"/http/{iflow_id.lower()}")
                 if not adapter_path.startswith("http"):
@@ -268,6 +277,36 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             self._set_json_headers(200)
             self.wfile.write(json.dumps(res).encode())
 
+        elif path == "/api/v1/doc/generate-spec" or path == "/doc/generate-spec":
+            try:
+                ref_docx_bytes = None
+                analysis_data = {}
+                metadata = {}
+                
+                content_type = self.headers.get("Content-Type", "").lower()
+                if "multipart/form-data" in content_type:
+                    ref_docx_bytes = extract_docx_from_multipart(body_bytes)
+                else:
+                    body_json = json.loads(body_bytes.decode("utf-8") or "{}")
+                    analysis_data = body_json.get("analysis") or {}
+                    metadata = body_json.get("metadata") or {}
+                    ref_b64 = body_json.get("reference_docx_b64") or ""
+                    if ref_b64:
+                        ref_docx_bytes = base64.b64decode(ref_b64)
+
+                iflow_id = (metadata and metadata.get("id")) or (analysis_data and analysis_data.get("name")) or "iFlow"
+                docx_bytes = doc_gen.generate_tech_spec(analysis_data, metadata, ref_docx_bytes)
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                self.send_header("Content-Disposition", f'attachment; filename="Technical_Specification_{iflow_id}.docx"')
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(docx_bytes)
+            except Exception as ex_doc:
+                self._set_json_headers(400)
+                self.wfile.write(json.dumps({"error": f"Docx generation error: {str(ex_doc)}"}).encode())
+
         elif path == "/api/v1/cpi/connect" or path == "/sap/artifacts":
             try:
                 creds = json.loads(body_bytes.decode("utf-8") or "{}")
@@ -286,7 +325,7 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                     token_url = creds.get("token_url") or creds.get("tokenurl")
 
                 auth_type = creds.get("auth_type") or creds.get("auth") or "oauth"
-                iflow_name = creds.get("iflow_name") or creds.get("iflowId") or "Horizon"
+                iflow_name = creds.get("iflow_name") or creds.get("iflowId") or ""
                 version = creds.get("version") or "active"
 
                 if tenant_url and client_id and client_secret:
@@ -309,28 +348,27 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                                 "auth_type": auth_type
                             }
 
-                            # 1. Query specific iFlow designtime metadata first
-                            odata_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_name}',Version='{version}')"
-                            try:
-                                res_data = fetch_cpi_odata_json(odata_url, bearer_token)
-                                if res_data and "d" in res_data:
-                                    item = res_data.get("d", {})
-                                    iflow_id = item.get("Id", iflow_name)
-                                    name = item.get("Name") or iflow_id
-                                    ver = item.get("Version", version)
-                                    pkg = item.get("PackageId", "DefaultPackage")
+                            if iflow_name:
+                                odata_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts(Id='{iflow_name}',Version='{version}')"
+                                try:
+                                    res_data = fetch_cpi_odata_json(odata_url, bearer_token)
+                                    if res_data and "d" in res_data:
+                                        item = res_data.get("d", {})
+                                        iflow_id = item.get("Id", iflow_name)
+                                        name = item.get("Name") or iflow_id
+                                        ver = item.get("Version", version)
+                                        pkg = item.get("PackageId", "DefaultPackage")
 
-                                    self._set_json_headers(200)
-                                    self.wfile.write(json.dumps({
-                                        "status": "LIVE_SUCCESS",
-                                        "message": f"Connected to SAP CPI! Fetched live iFlow '{iflow_id}'.",
-                                        "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
-                                    }).encode())
-                                    return
-                            except Exception as ex_single:
-                                print(f"Single iFlow OData query note: {ex_single}")
+                                        self._set_json_headers(200)
+                                        self.wfile.write(json.dumps({
+                                            "status": "LIVE_SUCCESS",
+                                            "message": f"Connected to SAP CPI! Fetched live iFlow '{iflow_id}'.",
+                                            "iflows": [{"id": iflow_id, "name": name, "version": ver, "package_id": pkg}]
+                                        }).encode())
+                                        return
+                                except Exception as ex_single:
+                                    print(f"Single iFlow OData query note: {ex_single}")
 
-                            # 2. Fallback: Query IntegrationRuntimeArtifacts (Cloud Foundry deployed artifacts)
                             runtime_url = f"{tenant_clean}/api/v1/IntegrationRuntimeArtifacts"
                             try:
                                 runtime_data = fetch_cpi_odata_json(runtime_url, bearer_token)
@@ -353,7 +391,6 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                             except Exception as ex_rt:
                                 print(f"Runtime artifacts OData query note: {ex_rt}")
 
-                            # 3. Fallback: Query IntegrationDesigntimeArtifacts list
                             dt_list_url = f"{tenant_clean}/api/v1/IntegrationDesigntimeArtifacts?$format=json"
                             try:
                                 dt_data = fetch_cpi_odata_json(dt_list_url, bearer_token)
@@ -376,8 +413,7 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                             except Exception as ex_dt:
                                 print(f"Designtime list OData query note: {ex_dt}")
 
-                            # 4. Fallback on 403 Forbidden: Register runtime credentials & connected tenant
-                            target_id = iflow_name if (iflow_name and iflow_name.lower() != "test") else "Horizon"
+                            target_id = iflow_name if iflow_name else "Horizon"
                             self._set_json_headers(200)
                             self.wfile.write(json.dumps({
                                 "status": "LIVE_SUCCESS",
@@ -421,7 +457,6 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                 auth_type = body_json.get("auth_type") or body_json.get("auth") or "oauth"
                 token_url = body_json.get("token_url") or body_json.get("tokenurl") or ""
 
-                # Fallback to session runtime credentials if missing
                 rt_saved = active_cpi_creds.get("runtime_creds") or {}
                 if not principal and rt_saved.get("client_id"):
                     principal = rt_saved["client_id"]
