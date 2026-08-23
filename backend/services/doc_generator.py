@@ -5,6 +5,10 @@ import sys
 import datetime
 import logging
 import subprocess
+import urllib.request
+import urllib.parse
+import urllib.error
+import ssl
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
@@ -72,13 +76,32 @@ def ensure_docx_installed() -> bool:
             logger.error(f"Runtime auto-install of python-docx failed: {e}")
             return False
 
+def replace_text_in_paragraph(paragraph, old_text: str, new_text: str) -> bool:
+    """Replaces text in a paragraph, handling placeholders split across multiple XML runs."""
+    if old_text not in paragraph.text:
+        return False
+    for run in paragraph.runs:
+        if old_text in run.text:
+            run.text = run.text.replace(old_text, new_text)
+            return True
+    full_text = paragraph.text.replace(old_text, new_text)
+    if paragraph.runs:
+        paragraph.runs[0].text = full_text
+        for run in paragraph.runs[1:]:
+            run.text = ""
+        return True
+    return False
+
 class TechSpecGenerator:
-    """Generates professional SAP CPI Technical Specification Word (.docx) documents."""
+    """Generates professional AI-powered SAP CPI Technical Specification Word (.docx) documents."""
 
     NAVY_HEX = "0B2545"
     BLUE_HEX = "134074"
     LIGHT_BG_HEX = "F4F6F9"
     CODE_BG_HEX = "07101D"
+
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
 
     def generate_tech_spec(
         self,
@@ -92,13 +115,105 @@ class TechSpecGenerator:
         iflow_name = analysis_data.get("name") or (metadata and metadata.get("name")) or "SAP iFlow"
         iflow_id = (metadata and metadata.get("id")) or iflow_name
 
-        if reference_docx_bytes and len(reference_docx_bytes) > 500:
+        # Extract text from reference document if provided
+        reference_text = ""
+        if reference_docx_bytes and len(reference_docx_bytes) > 200:
             try:
-                return self._fill_reference_template(reference_docx_bytes, analysis_data, metadata)
+                ref_doc = Document(io.BytesIO(reference_docx_bytes))
+                ref_paras = [p.text for p in ref_doc.paragraphs if p.text.strip()]
+                reference_text = "\n".join(ref_paras[:40])
+            except Exception as ex_ref:
+                logger.warning(f"Could not extract reference text: {ex_ref}")
+
+        # Synthesize AI Technical Content
+        ai_content = self._generate_ai_spec_content(analysis_data, metadata, reference_text)
+
+        if reference_docx_bytes and len(reference_docx_bytes) > 200:
+            try:
+                return self._fill_reference_template(reference_docx_bytes, analysis_data, metadata, ai_content)
             except Exception as e:
                 logger.error(f"Failed to fill reference docx template: {e}. Falling back to standard docx synthesis.", exc_info=True)
 
-        return self._build_standard_tech_spec(analysis_data, metadata, iflow_name, iflow_id)
+        return self._build_standard_tech_spec(analysis_data, metadata, iflow_name, iflow_id, ai_content)
+
+    def _generate_ai_spec_content(
+        self,
+        analysis: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]],
+        reference_text: str = ""
+    ) -> Dict[str, Any]:
+        iflow_name = analysis.get("name") or (metadata and metadata.get("name")) or "iFlow"
+        iflow_id = (metadata and metadata.get("id")) or iflow_name
+        sender = analysis.get("sender") or "HTTPS Sender Adapter"
+        receiver = analysis.get("receiver") or "Target Receiver System"
+        steps = ", ".join(analysis.get("steps", []))
+
+        # Default rule-based content
+        default_content = {
+            "summary": (
+                f"This technical specification defines the integration architecture, execution flow, data mapping rules, "
+                f"and test payloads for the SAP Integration Suite iFlow '{iflow_name}' (ID: {iflow_id}). "
+                f"The interface receives inbound messages from '{sender}' and routes processed payloads to '{receiver}'."
+            ),
+            "architecture": (
+                f"The interface follows an asynchronous/synchronous enterprise message exchange pattern. "
+                f"Inbound requests arrive at the HTTPS sender adapter, undergo payload validation and Groovy transformation, "
+                f"and execute message mappings before delivering to target receiver endpoints."
+            ),
+            "error_handling": (
+                f"Exceptions occurring during message processing are captured by the SAP CPI Exception Subprocess. "
+                f"The system logs an SAP Message Processing Log ID (MPL ID) for end-to-end trace logging and observability."
+            )
+        }
+
+        if not self.api_key:
+            return default_content
+
+        # Call Gemini AI for rich architectural content synthesis
+        try:
+            prompt = f"""
+You are a Lead SAP CPI Integration Architect.
+Generate technical specification documentation content for the following SAP CPI iFlow artifact:
+
+iFlow Name: {iflow_name} (ID: {iflow_id})
+Sender System: {sender}
+Receiver Systems: {receiver}
+Flow Sequence Steps: {steps}
+
+Reference Template Context:
+{reference_text or 'Standard SAP Integration Suite Technical Specification Template'}
+
+Return a clean JSON object containing:
+{{
+  "summary": "Detailed 3-sentence executive summary describing business value and technical purpose.",
+  "architecture": "Detailed paragraph describing message exchange patterns, transformation logic, and receiver routing.",
+  "error_handling": "Paragraph describing exception handling, SAP MPL ID logging, and alerting rules."
+}}
+"""
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                text_out = resp_data["candidates"][0]["content"]["parts"][0]["text"]
+                
+                json_match = re.search(r"\{.*\}", text_out, re.DOTALL)
+                if json_match:
+                    ai_json = json.loads(json_match.group(0))
+                    return {
+                        "summary": ai_json.get("summary", default_content["summary"]),
+                        "architecture": ai_json.get("architecture", default_content["architecture"]),
+                        "error_handling": ai_json.get("error_handling", default_content["error_handling"])
+                    }
+        except Exception as ex_ai:
+            logger.warning(f"Gemini AI spec synthesis note: {ex_ai}. Using rule-based spec content.")
+
+        return default_content
 
     def _set_cell_background(self, cell, fill_hex: str):
         tcPr = cell._tc.get_or_add_tcPr()
@@ -109,10 +224,11 @@ class TechSpecGenerator:
         self,
         reference_bytes: bytes,
         analysis: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]]
+        metadata: Optional[Dict[str, Any]],
+        ai_content: Dict[str, Any]
     ) -> bytes:
         doc = Document(io.BytesIO(reference_bytes))
-        iflow_name = analysis.get("name") or "iFlow"
+        iflow_name = analysis.get("name") or (metadata and metadata.get("name")) or "iFlow"
         iflow_id = (metadata and metadata.get("id")) or iflow_name
         sender = analysis.get("sender") or "HTTPS Sender"
         receiver = analysis.get("receiver") or "Receiver System"
@@ -124,14 +240,16 @@ class TechSpecGenerator:
             "{{SENDER}}": sender,
             "{{RECEIVER}}": receiver,
             "{{DATE}}": today_str,
+            "{{SUMMARY}}": ai_content.get("summary", ""),
+            "{{ARCHITECTURE}}": ai_content.get("architecture", ""),
+            "{{ERROR_HANDLING}}": ai_content.get("error_handling", ""),
             "{{TIMESTAMP}}": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
-        # 1. Replace placeholder text in all paragraphs
+        # 1. Replace placeholder text in all paragraphs (handles split XML runs!)
         for p in doc.paragraphs:
             for key, val in replacements.items():
-                if key in p.text:
-                    p.text = p.text.replace(key, val)
+                replace_text_in_paragraph(p, key, val)
 
         # 2. Replace placeholder text in all tables
         for table in doc.tables:
@@ -139,32 +257,34 @@ class TechSpecGenerator:
                 for cell in row.cells:
                     for p in cell.paragraphs:
                         for key, val in replacements.items():
-                            if key in p.text:
-                                p.text = p.text.replace(key, val)
+                            replace_text_in_paragraph(p, key, val)
 
-        # 3. Append extracted dynamic analysis sections to the reference document
-        doc.add_heading(f"Extracted Specifications for '{iflow_name}' (ID: {iflow_id})", level=1)
-        doc.add_paragraph(
-            f"The following technical specifications, interface sequence steps, configuration table, "
-            f"required HTTP headers, exchange properties, and test payloads were dynamically extracted from iFlow '{iflow_name}'."
-        )
+        # 3. Append complete extracted iFlow technical specification sections
+        doc.add_heading(f"Extracted Technical Specifications for '{iflow_name}' (ID: {iflow_id})", level=1)
+        
+        p_desc = doc.add_paragraph()
+        p_desc.add_run(ai_content.get("summary", ""))
+
+        doc.add_heading("Architecture & Error Handling", level=2)
+        doc.add_paragraph(ai_content.get("architecture", ""))
+        doc.add_paragraph(ai_content.get("error_handling", ""))
 
         steps = analysis.get("steps", [])
         if steps:
-            doc.add_heading("1. Interface Execution Sequence Steps", level=2)
+            doc.add_heading("Execution Steps Sequence", level=2)
             for i, step in enumerate(steps, 1):
                 doc.add_paragraph(f"{i}. {step}")
 
-        doc.add_heading("2. Extracted Configuration Mapping Table", level=2)
+        doc.add_heading("Extracted Configuration Mapping Table", level=2)
         self._add_config_table(doc, analysis.get("config", []))
 
-        doc.add_heading("3. Required HTTP Headers", level=2)
+        doc.add_heading("Required HTTP Headers", level=2)
         self._add_requirements_table(doc, "Required HTTP Headers", analysis.get("headers", []))
 
-        doc.add_heading("4. Required Exchange Properties", level=2)
+        doc.add_heading("Required Exchange Properties", level=2)
         self._add_requirements_table(doc, "Exchange Properties", analysis.get("properties", []))
 
-        doc.add_heading("5. Schema-Derived Test Payloads", level=2)
+        doc.add_heading("Schema-Derived Test Payloads", level=2)
         self._add_payloads_section(doc, analysis.get("payloads", []))
 
         buf = io.BytesIO()
@@ -176,7 +296,8 @@ class TechSpecGenerator:
         analysis: Dict[str, Any],
         metadata: Optional[Dict[str, Any]],
         iflow_name: str,
-        iflow_id: str
+        iflow_id: str,
+        ai_content: Dict[str, Any]
     ) -> bytes:
         doc = Document()
 
@@ -229,11 +350,7 @@ class TechSpecGenerator:
 
         # 1. Executive Summary
         doc.add_heading("1. Executive Summary", level=1)
-        doc.add_paragraph(
-            f"This technical specification provides the complete design, extracted flow sequence, "
-            f"configuration mapping tables, required headers, and test payloads for the SAP Integration Suite "
-            f"iFlow '{iflow_name}'. All specifications are extracted directly from authoritative design-time artifacts."
-        )
+        doc.add_paragraph(ai_content.get("summary", ""))
 
         # Package Inventory
         inventory = analysis.get("inventory", {})
@@ -244,8 +361,9 @@ class TechSpecGenerator:
                 if files:
                     doc.add_paragraph(f"• {kind}: " + ", ".join(files), style='List Bullet')
 
-        # 2. Sender & Receiver Systems
+        # 2. Interface Architecture & Sequence
         doc.add_heading("2. Interface Architecture & Flow Sequence", level=1)
+        doc.add_paragraph(ai_content.get("architecture", ""))
         doc.add_paragraph(f"• Sender System: {analysis.get('sender', 'HTTPS Sender Adapter')}")
         doc.add_paragraph(f"• Receiver Systems: {analysis.get('receiver', 'Backend Target System')}")
 
@@ -255,26 +373,30 @@ class TechSpecGenerator:
             for i, step in enumerate(steps, 1):
                 doc.add_paragraph(f"{i}. {step}")
 
-        # 3. Configuration Table
-        doc.add_heading("3. Extracted Configuration Table", level=1)
+        # 3. Exception Handling
+        doc.add_heading("3. Exception Handling & Logging", level=1)
+        doc.add_paragraph(ai_content.get("error_handling", ""))
+
+        # 4. Configuration Table
+        doc.add_heading("4. Extracted Configuration Table", level=1)
         self._add_config_table(doc, analysis.get("config", []))
 
-        # 4. Required Headers
-        doc.add_heading("4. Required HTTP Headers", level=1)
+        # 5. Required Headers
+        doc.add_heading("5. Required HTTP Headers", level=1)
         self._add_requirements_table(doc, "Required HTTP Headers", analysis.get("headers", []))
 
-        # 5. Exchange Properties
-        doc.add_heading("5. Required Exchange Properties", level=1)
+        # 6. Exchange Properties
+        doc.add_heading("6. Required Exchange Properties", level=1)
         self._add_requirements_table(doc, "Exchange Properties", analysis.get("properties", []))
 
-        # 6. Test Payloads Section
-        doc.add_heading("6. Schema-Derived Test Payloads", level=1)
+        # 7. Test Payloads Section
+        doc.add_heading("7. Schema-Derived Test Payloads", level=1)
         self._add_payloads_section(doc, analysis.get("payloads", []))
 
-        # 7. Assumptions & Gaps
+        # 8. Assumptions & Gaps
         assumptions = analysis.get("assumptions", [])
         if assumptions:
-            doc.add_heading("7. Assumptions & Technical Gaps", level=1)
+            doc.add_heading("8. Assumptions & Technical Gaps", level=1)
             for ass in assumptions:
                 doc.add_paragraph(f"• {ass}", style='List Bullet')
 
