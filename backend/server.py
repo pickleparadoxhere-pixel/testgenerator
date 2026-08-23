@@ -321,50 +321,6 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             self._set_json_headers(200)
             self.wfile.write(json.dumps(res).encode())
 
-        elif path == "/api/v1/doc/generate-spec" or path == "/doc/generate-spec":
-            try:
-                ref_docx_bytes = None
-                analysis_data = {}
-                metadata = {}
-                
-                content_type = self.headers.get("Content-Type", "").lower()
-                if "multipart/form-data" in content_type:
-                    fields, files = parse_multipart_payload(body_bytes, content_type)
-                    if "analysis" in fields:
-                        try:
-                            analysis_data = json.loads(fields["analysis"])
-                        except Exception:
-                            pass
-                    if "metadata" in fields:
-                        try:
-                            metadata = json.loads(fields["metadata"])
-                        except Exception:
-                            pass
-                    if "template_file" in files and len(files["template_file"]) > 100:
-                        ref_docx_bytes = files["template_file"]
-                    else:
-                        ref_docx_bytes = extract_docx_from_multipart(body_bytes)
-                else:
-                    body_json = json.loads(body_bytes.decode("utf-8") or "{}")
-                    analysis_data = body_json.get("analysis") or {}
-                    metadata = body_json.get("metadata") or {}
-                    ref_b64 = body_json.get("reference_docx_b64") or ""
-                    if ref_b64:
-                        ref_docx_bytes = base64.b64decode(ref_b64)
-
-                iflow_id = (metadata and metadata.get("id")) or (analysis_data and analysis_data.get("name")) or "iFlow"
-                docx_bytes = doc_gen.generate_tech_spec(analysis_data, metadata, ref_docx_bytes)
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                self.send_header("Content-Disposition", f'attachment; filename="Technical_Specification_{iflow_id}.docx"')
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(docx_bytes)
-            except Exception as ex_doc:
-                self._set_json_headers(400)
-                self.wfile.write(json.dumps({"error": f"Docx generation error: {str(ex_doc)}"}).encode())
-
         elif path == "/api/v1/cpi/connect" or path == "/sap/artifacts":
             try:
                 creds = json.loads(body_bytes.decode("utf-8") or "{}")

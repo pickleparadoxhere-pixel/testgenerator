@@ -40,7 +40,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const payloadCardsList = document.getElementById("payloadCardsList");
   const reportMarkdownContainer = document.getElementById("reportMarkdownContainer");
   const btnDownloadReport = document.getElementById("btnDownloadReport");
-  const btnDownloadDocxReport = document.getElementById("btnDownloadDocxReport");
 
   // DOM Elements - Test Window
   const sectionTestWindow = document.getElementById("section-test-window");
@@ -75,13 +74,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnSaveMock = document.getElementById("btnSaveMock");
   const mockSaveStatus = document.getElementById("mockSaveStatus");
   const btnLoadSample = document.getElementById("btnLoadSample");
-
-  // DOM Elements - Section 5 Technical Specification Generator (.docx)
-  const sectionDocGen = document.getElementById("section-doc-gen");
-  const docxFileInput = document.getElementById("docxFileInput");
-  const docxFilename = document.getElementById("docxFilename");
-  const btnGenerateDocx = document.getElementById("btnGenerateDocx");
-  const docGenStatus = document.getElementById("docGenStatus");
 
   let selectedFiles = [];
 
@@ -301,10 +293,9 @@ document.addEventListener("DOMContentLoaded", () => {
     currentAnalysis = data.analysis || {};
     generatedPayloads = currentAnalysis.payloads || [];
 
-    // Show Results, Test Window, & Technical Spec Sections
+    // Show Results & Test Window Sections
     sectionResults.style.display = "block";
     sectionTestWindow.style.display = "block";
-    if (sectionDocGen) sectionDocGen.style.display = "block";
 
     // 1. Render Test Payload Cards
     renderPayloadCards(generatedPayloads);
@@ -389,86 +380,6 @@ document.addEventListener("DOMContentLoaded", () => {
         sectionTestWindow.scrollIntoView({ behavior: "smooth" });
       });
     });
-  }
-
-  // Generate & Download Technical Specification .docx Document
-  async function downloadTechSpecDocx() {
-    if (!currentAnalysis) {
-      alert("Please select or analyze an iFlow first before generating a technical specification document.");
-      return;
-    }
-
-    if (docGenStatus) {
-      docGenStatus.className = "status-msg";
-      docGenStatus.textContent = "Generating Word (.docx) technical specification...";
-    }
-    if (btnGenerateDocx) btnGenerateDocx.disabled = true;
-    if (btnDownloadDocxReport) btnDownloadDocxReport.disabled = true;
-
-    try {
-      const formData = new FormData();
-      formData.append("analysis", JSON.stringify(currentAnalysis));
-      formData.append("metadata", JSON.stringify(currentMetadata || {}));
-
-      if (docxFileInput && docxFileInput.files && docxFileInput.files.length > 0) {
-        formData.append("template_file", docxFileInput.files[0]);
-      }
-
-      const resp = await fetch("/api/v1/doc/generate-spec", {
-        method: "POST",
-        body: formData
-      });
-
-      if (resp.ok) {
-        const blob = await resp.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        const filename = (currentMetadata && currentMetadata.id) ? `Technical_Specification_${currentMetadata.id}.docx` : "Technical_Specification_iFlow.docx";
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-
-        if (docGenStatus) {
-          docGenStatus.className = "status-msg success";
-          docGenStatus.textContent = "Downloaded Technical Specification Word (.docx) Document!";
-        }
-      } else {
-        const err = await resp.json();
-        if (docGenStatus) {
-          docGenStatus.className = "status-msg error";
-          docGenStatus.textContent = err.error || "Failed to generate .docx document.";
-        }
-      }
-    } catch (err) {
-      if (docGenStatus) {
-        docGenStatus.className = "status-msg error";
-        docGenStatus.textContent = `Error: ${err.message}`;
-      }
-    } finally {
-      if (btnGenerateDocx) btnGenerateDocx.disabled = false;
-      if (btnDownloadDocxReport) btnDownloadDocxReport.disabled = false;
-    }
-  }
-
-  if (docxFileInput && docxFilename) {
-    docxFileInput.addEventListener("change", () => {
-      if (docxFileInput.files && docxFileInput.files.length > 0) {
-        docxFilename.textContent = `Uploaded Reference Template: ${docxFileInput.files[0].name}`;
-      } else {
-        docxFilename.textContent = "No reference template uploaded. Will use standard SAP Enterprise styling schema.";
-      }
-    });
-  }
-
-  if (btnGenerateDocx) {
-    btnGenerateDocx.addEventListener("click", downloadTechSpecDocx);
-  }
-
-  if (btnDownloadDocxReport) {
-    btnDownloadDocxReport.addEventListener("click", downloadTechSpecDocx);
   }
 
   if (btnDownloadReport) {

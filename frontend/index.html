@@ -121,7 +121,6 @@
       <div id="tab-report" class="tab-content">
         <div class="report-actions">
           <button id="btnDownloadReport" class="btn btn-secondary btn-sm"><span>📥</span> Download Markdown Report</button>
-          <button id="btnDownloadDocxReport" class="btn btn-primary btn-sm"><span>📄</span> Download Technical Spec (.docx)</button>
         </div>
         <div id="reportMarkdownContainer" class="markdown-preview"></div>
       </div>
@@ -262,36 +261,6 @@
           <span>💾</span> Save Mock Response
         </button>
         <span id="mockSaveStatus" class="status-msg"></span>
-      </div>
-    </section>
-
-    <!-- Section 5: Technical Specification Document (.docx) Generator -->
-    <section class="panel" id="section-doc-gen" style="display: none;">
-      <div class="panel-header">
-        <h2>5. Technical Specification Document (.docx) Generator</h2>
-        <p class="panel-desc">Generate a complete Word (.docx) technical specification document based on analyzed iFlow details. Upload a reference template to preserve custom styles and schema.</p>
-      </div>
-
-      <div class="form-grid">
-        <div class="field-group wide">
-          <label class="field-label">Reference Technical Spec Template (.docx) [Optional]</label>
-          <div id="docxDropZone" class="drop-zone drop-zone-sm">
-            <div class="drop-icon">📄</div>
-            <div class="drop-text">
-              <label for="docxFileInput" class="choose-btn btn-secondary">Choose Reference .docx Template</label>
-              <input type="file" id="docxFileInput" accept=".docx">
-            </div>
-            <div id="docxFilename" class="drop-filename">No reference template uploaded. Will use standard SAP Enterprise styling schema.</div>
-          </div>
-          <span class="field-hint">If uploaded, the generator populates extracted iFlow configuration & test payloads into your reference Word document while keeping your exact layout, logos, and styles intact.</span>
-        </div>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btnGenerateDocx" class="btn btn-primary btn-lg">
-          <span>📄</span> Generate & Download Technical Spec (.docx)
-        </button>
-        <span id="docGenStatus" class="status-msg"></span>
       </div>
     </section>
   </main>
