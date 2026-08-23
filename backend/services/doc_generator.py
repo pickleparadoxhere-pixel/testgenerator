@@ -5,17 +5,24 @@ import logging
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
-import docx
-from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
-
 logger = logging.getLogger(__name__)
 
+try:
+    import docx
+    from docx import Document
+    from docx.shared import Inches, Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+    logger.warning("python-docx is not installed. Docx generation will return a fallback warning.")
+
 def set_cell_background(cell, fill_hex: str):
+    if not HAS_DOCX:
+        return
     tcPr = cell._tc.get_or_add_tcPr()
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
     tcPr.append(shd)
@@ -34,6 +41,9 @@ class TechSpecGenerator:
         metadata: Optional[Dict[str, Any]] = None,
         reference_docx_bytes: Optional[bytes] = None
     ) -> bytes:
+        if not HAS_DOCX:
+            raise RuntimeError("python-docx is not installed on the server environment. Please run 'pip install python-docx'.")
+
         iflow_name = analysis_data.get("name") or (metadata and metadata.get("name")) or "SAP iFlow"
         iflow_id = (metadata and metadata.get("id")) or iflow_name
 
@@ -204,7 +214,7 @@ class TechSpecGenerator:
         doc.save(buf)
         return buf.getvalue()
 
-    def _add_config_table(self, doc: Document, configs: List[Dict[str, Any]]):
+    def _add_config_table(self, doc, configs: List[Dict[str, Any]]):
         if not configs:
             doc.add_paragraph("No specific configuration steps extracted.")
             return
@@ -233,7 +243,7 @@ class TechSpecGenerator:
 
         doc.add_paragraph().paragraph_format.space_after = Pt(8)
 
-    def _add_requirements_table(self, doc: Document, label: str, reqs: List[Dict[str, Any]]):
+    def _add_requirements_table(self, doc, label: str, reqs: List[Dict[str, Any]]):
         if not reqs:
             doc.add_paragraph(f"No mandatory {label.lower()} detected.")
             return
@@ -261,7 +271,7 @@ class TechSpecGenerator:
 
         doc.add_paragraph().paragraph_format.space_after = Pt(8)
 
-    def _add_payloads_section(self, doc: Document, payloads: List[Dict[str, Any]]):
+    def _add_payloads_section(self, doc, payloads: List[Dict[str, Any]]):
         if not payloads:
             doc.add_paragraph("No schema test payloads generated.")
             return

@@ -2,7 +2,7 @@ services:
   - type: web
     name: sap-cpi-ai-studio
     env: python
-    buildCommand: ""
+    buildCommand: "pip install -r requirements.txt"
     startCommand: python3 backend/server.py
     envVars:
       - key: PORT
