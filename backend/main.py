@@ -22,7 +22,6 @@ from backend.services.iflow_parser import IFlowParser
 from backend.services.ai_test_generator import AITestGenerator
 from backend.services.cpi_runner import CPITestRunner
 from backend.services.mock_server import mock_manager, mock_router
-from backend.services.doc_generator import TechSpecGenerator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")

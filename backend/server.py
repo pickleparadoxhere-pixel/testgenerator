@@ -24,7 +24,6 @@ from backend.services.iflow_parser import IFlowParser
 from backend.services.ai_test_generator import AITestGenerator
 from backend.services.cpi_runner import CPITestRunner
 from backend.services.mock_server import mock_manager
-from backend.services.doc_generator import TechSpecGenerator
 from backend.samples.sample_iflow import create_sample_iflow_zip
 from backend.models.schema import (
     IFlowMetadata, TestSuiteGenerationRequest, TestExecutionRequest,
@@ -33,7 +32,6 @@ from backend.models.schema import (
 
 parser = IFlowParser()
 ai_service = AITestGenerator()
-doc_gen = TechSpecGenerator()
 
 # Active SAP CPI session credentials
 active_cpi_creds = {}
