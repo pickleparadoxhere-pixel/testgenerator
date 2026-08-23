@@ -10,6 +10,7 @@ import socketserver
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Ensure root workspace directory is in PYTHONPATH
