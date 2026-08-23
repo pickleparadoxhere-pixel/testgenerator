@@ -103,5 +103,21 @@ class TestSAPCPIAgent(unittest.TestCase):
         res4 = agent.execute_query("Which iFlows were modified recently?")
         self.assertGreater(len(res4["results"]), 0)
 
+    def test_cpi_monitoring_agent(self):
+        from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
+        agent = CPIDiscoveryAgent()
+
+        # Test Health Summary Report
+        res1 = agent.execute_query("Give me a health report of my CPI tenant.")
+        self.assertIn("CPI TENANT HEALTH SUMMARY", res1["answer"])
+
+        # Test Failures Today
+        res2 = agent.execute_query("How many failures happened today?")
+        self.assertIn("MessageProcessingLogs", res2["sources_checked"])
+
+        # Test Expiring Certificates
+        res3 = agent.execute_query("Which certificates expire within 30 days?")
+        self.assertIn("KeystoreEntries", res3["sources_checked"])
+
 if __name__ == "__main__":
     unittest.main()
