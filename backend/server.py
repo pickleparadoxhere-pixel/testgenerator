@@ -24,6 +24,7 @@ from backend.services.iflow_parser import IFlowParser
 from backend.services.ai_test_generator import AITestGenerator
 from backend.services.cpi_runner import CPITestRunner
 from backend.services.mock_server import mock_manager
+from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
 from backend.samples.sample_iflow import create_sample_iflow_zip
 from backend.models.schema import (
     IFlowMetadata, TestSuiteGenerationRequest, TestExecutionRequest,
@@ -32,6 +33,7 @@ from backend.models.schema import (
 
 parser = IFlowParser()
 ai_service = AITestGenerator()
+discovery_agent = CPIDiscoveryAgent()
 
 # Active SAP CPI session credentials
 active_cpi_creds = {}
@@ -318,6 +320,24 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
             res = analyze_zip_content(zip_bytes, "Uploaded_iFlow.zip")
             self._set_json_headers(200)
             self.wfile.write(json.dumps(res).encode())
+
+        elif path == "/api/v1/cpi/discovery/query":
+            try:
+                body_json = json.loads(body_bytes.decode("utf-8") or "{}")
+                query_text = body_json.get("query", "Show all iFlows")
+                tenant_url = active_cpi_creds.get("tenant_url")
+                bearer_token = active_cpi_creds.get("bearer_token")
+
+                res = discovery_agent.execute_query(
+                    query_text=query_text,
+                    tenant_url=tenant_url,
+                    bearer_token=bearer_token
+                )
+                self._set_json_headers(200)
+                self.wfile.write(json.dumps(res).encode())
+            except Exception as ex_disc:
+                self._set_json_headers(400)
+                self.wfile.write(json.dumps({"error": f"Discovery Agent query error: {str(ex_disc)}"}).encode())
 
         elif path == "/api/v1/cpi/connect" or path == "/sap/artifacts":
             try:

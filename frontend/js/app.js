@@ -532,6 +532,123 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // --- CPI Discovery Agent Engine ---
+  const discoveryQueryInput = document.getElementById("discoveryQueryInput");
+  const btnAskDiscovery = document.getElementById("btnAskDiscovery");
+  const discoveryStatus = document.getElementById("discoveryStatus");
+  const discoveryResultsBox = document.getElementById("discoveryResultsBox");
+  const agentAnswerText = document.getElementById("agentAnswerText");
+  const discoveryTbody = document.getElementById("discoveryTbody");
+
+  // Quick Prompt Chips
+  document.querySelectorAll(".chip-btn").forEach(chip => {
+    chip.addEventListener("click", (e) => {
+      const q = e.currentTarget.getAttribute("data-query");
+      if (discoveryQueryInput) discoveryQueryInput.value = q;
+      executeDiscoveryQuery(q);
+    });
+  });
+
+  if (btnAskDiscovery) {
+    btnAskDiscovery.addEventListener("click", () => {
+      const q = discoveryQueryInput ? discoveryQueryInput.value.trim() : "";
+      if (q) executeDiscoveryQuery(q);
+    });
+  }
+
+  if (discoveryQueryInput) {
+    discoveryQueryInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const q = discoveryQueryInput.value.trim();
+        if (q) executeDiscoveryQuery(q);
+      }
+    });
+  }
+
+  async function executeDiscoveryQuery(queryText) {
+    if (!queryText) return;
+    if (discoveryStatus) {
+      discoveryStatus.className = "status-msg";
+      discoveryStatus.textContent = "Querying CPI Discovery Agent...";
+    }
+    if (btnAskDiscovery) btnAskDiscovery.disabled = true;
+
+    try {
+      const resp = await fetch("/api/v1/cpi/discovery/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: queryText })
+      });
+      const data = await resp.json();
+
+      if (resp.ok) {
+        if (discoveryStatus) {
+          discoveryStatus.className = "status-msg success";
+          discoveryStatus.textContent = `Found ${data.matched_count} matching iFlow(s).`;
+        }
+        displayDiscoveryResults(data);
+      } else {
+        if (discoveryStatus) {
+          discoveryStatus.className = "status-msg error";
+          discoveryStatus.textContent = data.error || "Query execution failed.";
+        }
+      }
+    } catch (err) {
+      if (discoveryStatus) {
+        discoveryStatus.className = "status-msg error";
+        discoveryStatus.textContent = `Error: ${err.message}`;
+      }
+    } finally {
+      if (btnAskDiscovery) btnAskDiscovery.disabled = false;
+    }
+  }
+
+  function displayDiscoveryResults(data) {
+    if (!discoveryResultsBox) return;
+    discoveryResultsBox.style.display = "block";
+
+    let formattedAnswer = escapeHtml(data.answer || "")
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    agentAnswerText.innerHTML = formattedAnswer;
+
+    discoveryTbody.innerHTML = "";
+    const results = data.results || [];
+    if (results.length === 0) {
+      discoveryTbody.innerHTML = `<tr><td colspan="7" class="hint">No matching artifacts found.</td></tr>`;
+      return;
+    }
+
+    results.forEach(item => {
+      const tr = document.createElement("tr");
+      const adaptersStr = (item.adapters || []).map(ad => `<span class="badge">${ad}</span>`).join(" ");
+      const isDeployed = item.status === "DEPLOYED";
+
+      tr.innerHTML = `
+        <td><strong>${item.id}</strong></td>
+        <td>${item.name || item.id}</td>
+        <td><span class="badge">${item.version || "1.0.0"}</span></td>
+        <td>${item.package_id || "DefaultPackage"}</td>
+        <td><span class="badge ${isDeployed ? 'badge-success' : ''}">${item.status || 'DESIGNTIME'}</span></td>
+        <td>${adaptersStr || '<span class="badge">HTTPS</span>'}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm btn-disc-analyze" data-id="${item.id}">
+            <span>⚡</span> Analyze & Payloads
+          </button>
+        </td>
+      `;
+      discoveryTbody.appendChild(tr);
+    });
+
+    document.querySelectorAll(".btn-disc-analyze").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = e.currentTarget.getAttribute("data-id");
+        fetchAndAnalyzeIFlow(id);
+      });
+    });
+
+    discoveryResultsBox.scrollIntoView({ behavior: "smooth" });
+  }
+
   // File Upload Handlers
   if (fileInput) {
     fileInput.addEventListener("change", (e) => {

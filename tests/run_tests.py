@@ -83,5 +83,25 @@ class TestSAPCPIAgent(unittest.TestCase):
         self.assertEqual(report.passed, len(test_cases))
         self.assertIsNotNone(report.junit_xml)
 
+    def test_cpi_discovery_agent(self):
+        from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
+        agent = CPIDiscoveryAgent()
+        
+        # Test 1: SFTP query
+        res1 = agent.execute_query("Find all iFlows containing SFTP.")
+        self.assertGreater(len(res1["results"]), 0)
+
+        # Test 2: Customer package query
+        res2 = agent.execute_query("What integrations are in the Customer package?")
+        self.assertGreater(len(res2["results"]), 0)
+
+        # Test 3: Deployed iFlows query
+        res3 = agent.execute_query("Show me all deployed iFlows.")
+        self.assertGreater(len(res3["results"]), 0)
+
+        # Test 4: Recently modified query
+        res4 = agent.execute_query("Which iFlows were modified recently?")
+        self.assertGreater(len(res4["results"]), 0)
+
 if __name__ == "__main__":
     unittest.main()

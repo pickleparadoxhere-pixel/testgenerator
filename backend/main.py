@@ -22,6 +22,9 @@ from backend.services.iflow_parser import IFlowParser
 from backend.services.ai_test_generator import AITestGenerator
 from backend.services.cpi_runner import CPITestRunner
 from backend.services.mock_server import mock_manager, mock_router
+from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
+
+discovery_agent = CPIDiscoveryAgent()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
@@ -322,6 +325,17 @@ async def run_runtime_test(body: Dict[str, Any] = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/cpi/discovery/query")
+def discovery_query(payload: Dict[str, Any]):
+    query_text = payload.get("query", "Show all iFlows")
+    tenant_url = active_cpi_creds.get("tenant_url")
+    bearer_token = active_cpi_creds.get("bearer_token")
+    return discovery_agent.execute_query(
+        query_text=query_text,
+        tenant_url=tenant_url,
+        bearer_token=bearer_token
+    )
 
 @app.get("/api/v1/sample-iflow")
 def get_sample_iflow():

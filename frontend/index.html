@@ -97,6 +97,62 @@
       </div>
     </section>
 
+    <!-- CPI Discovery Agent Section -->
+    <section class="panel discovery-panel" id="section-discovery">
+      <div class="panel-header">
+        <h2>🔍 CPI Discovery Agent</h2>
+        <p class="panel-desc">Ask natural language questions across your SAP CPI Designtime & Runtime artifacts. Uses SAP CPI APIs to query live context.</p>
+      </div>
+
+      <!-- Quick Suggestion Chips -->
+      <div class="suggestion-chips">
+        <span class="chip-label">Quick Prompts:</span>
+        <button class="chip-btn" data-query="Find all iFlows containing SFTP.">🔍 SFTP iFlows</button>
+        <button class="chip-btn" data-query="What integrations are in the Customer package?">📦 Customer Package</button>
+        <button class="chip-btn" data-query="Show me all deployed iFlows.">⚡ Deployed iFlows</button>
+        <button class="chip-btn" data-query="Which iFlows were modified recently?">🕒 Recently Modified</button>
+        <button class="chip-btn" data-query="Find iFlows with Groovy scripts or HTTPS.">📜 Groovy / HTTPS</button>
+      </div>
+
+      <!-- Query Input Box -->
+      <div class="discovery-input-group">
+        <input type="text" id="discoveryQueryInput" class="form-input" placeholder="e.g. Find all iFlows containing SFTP or What integrations are in Customer package?">
+        <button id="btnAskDiscovery" class="btn btn-primary">
+          <span>🤖</span> Ask Discovery Agent
+        </button>
+      </div>
+      <span id="discoveryStatus" class="status-msg"></span>
+
+      <!-- Agent Response & Results Table -->
+      <div id="discoveryResultsBox" class="discovery-results-box" style="display: none; margin-top: 16px;">
+        <div class="agent-response-card">
+          <div class="agent-avatar">🤖</div>
+          <div class="agent-content">
+            <div id="agentAnswerText" class="agent-answer"></div>
+          </div>
+        </div>
+
+        <div class="table-responsive" style="margin-top: 16px;">
+          <table class="artifact-table">
+            <thead>
+              <tr>
+                <th>Artifact ID</th>
+                <th>Name</th>
+                <th>Version</th>
+                <th>Package</th>
+                <th>Status</th>
+                <th>Adapters / Tech</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="discoveryTbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- Section 2: Analysis Results & Test Payloads -->
     <section class="panel" id="section-results" style="display: none;">
       <div class="panel-header">
