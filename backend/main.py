@@ -331,10 +331,12 @@ def discovery_query(payload: Dict[str, Any]):
     query_text = payload.get("query", "Show all iFlows")
     tenant_url = active_cpi_creds.get("tenant_url")
     bearer_token = active_cpi_creds.get("bearer_token")
+    api_key = payload.get("gemini_api_key") or payload.get("api_key") or os.getenv("GEMINI_API_KEY")
     return discovery_agent.execute_query(
         query_text=query_text,
         tenant_url=tenant_url,
-        bearer_token=bearer_token
+        bearer_token=bearer_token,
+        api_key=api_key
     )
 
 @app.get("/api/v1/sample-iflow")

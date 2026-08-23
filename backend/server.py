@@ -327,11 +327,13 @@ class AgentHTTPRequestHandler(BaseHTTPRequestHandler):
                 query_text = body_json.get("query", "Show all iFlows")
                 tenant_url = active_cpi_creds.get("tenant_url")
                 bearer_token = active_cpi_creds.get("bearer_token")
+                gemini_key = body_json.get("gemini_api_key") or body_json.get("api_key") or os.getenv("GEMINI_API_KEY")
 
                 res = discovery_agent.execute_query(
                     query_text=query_text,
                     tenant_url=tenant_url,
-                    bearer_token=bearer_token
+                    bearer_token=bearer_token,
+                    api_key=gemini_key
                 )
                 self._set_json_headers(200)
                 self.wfile.write(json.dumps(res).encode())

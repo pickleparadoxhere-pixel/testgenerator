@@ -534,11 +534,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- CPI Discovery Agent Engine ---
   const discoveryQueryInput = document.getElementById("discoveryQueryInput");
+  const geminiApiKeyInput = document.getElementById("geminiApiKeyInput");
   const btnAskDiscovery = document.getElementById("btnAskDiscovery");
   const discoveryStatus = document.getElementById("discoveryStatus");
   const discoveryResultsBox = document.getElementById("discoveryResultsBox");
   const agentAnswerText = document.getElementById("agentAnswerText");
   const discoveryTbody = document.getElementById("discoveryTbody");
+
+  // Load saved Gemini API Key
+  if (geminiApiKeyInput) {
+    const savedKey = localStorage.getItem("gemini_api_key") || "";
+    geminiApiKeyInput.value = savedKey;
+    geminiApiKeyInput.addEventListener("change", () => {
+      localStorage.setItem("gemini_api_key", geminiApiKeyInput.value.trim());
+    });
+  }
 
   // Quick Prompt Chips
   document.querySelectorAll(".chip-btn").forEach(chip => {
@@ -573,11 +583,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (btnAskDiscovery) btnAskDiscovery.disabled = true;
 
+    const apiKey = geminiApiKeyInput ? geminiApiKeyInput.value.trim() : "";
+    if (apiKey) localStorage.setItem("gemini_api_key", apiKey);
+
     try {
       const resp = await fetch("/api/v1/cpi/discovery/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: queryText })
+        body: JSON.stringify({
+          query: queryText,
+          gemini_api_key: apiKey
+        })
       });
       const data = await resp.json();
 

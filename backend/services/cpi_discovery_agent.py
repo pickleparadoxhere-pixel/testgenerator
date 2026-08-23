@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 class CPIDiscoveryAgent:
     """
     Unified SAP CPI Autonomous Agent with full Discovery, Health Analysis,
-    MPL Failure Diagnostics, Certificate Monitoring, and Cross-Domain Correlation capabilities.
+    MPL Failure Diagnostics, Certificate Monitoring, and Cross-Domain Correlation.
+    Integrates Gemini AI Function / Tool Calling for native natural language reasoning.
     """
 
     def __init__(self, api_key: str = None):
@@ -30,12 +31,14 @@ class CPIDiscoveryAgent:
         query_text: str,
         artifacts_list: List[Dict[str, Any]] = None,
         tenant_url: str = None,
-        bearer_token: str = None
+        bearer_token: str = None,
+        api_key: str = None
     ) -> Dict[str, Any]:
         query_clean = query_text.strip()
-        logger.info(f"Executing SAP CPI Agent query: '{query_clean}'")
+        active_api_key = api_key or self.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("PALM_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        logger.info(f"Executing SAP CPI Agent query: '{query_clean}' (AI Key Active: {bool(active_api_key)})")
 
-        # 1. Fetch raw CPI API endpoints context (Designtime, Packages, Runtime, Endpoints, MPL, Keystore)
+        # 1. Fetch raw CPI API endpoints context
         raw_packages, raw_designtime, raw_runtime, raw_endpoints, raw_mpl, raw_keystore = self._fetch_all_cpi_apis(
             tenant_url=tenant_url,
             bearer_token=bearer_token,
@@ -49,14 +52,19 @@ class CPIDiscoveryAgent:
         mon_model = CPIMonitoringModel(raw_mpl, raw_keystore)
         mon_registry = CPIMonitoringToolRegistry(mon_model)
 
-        # 3. Reasoning & tool execution engine
-        results, reason, queried_sources, health_summary = self._reason_and_execute(
-            query_clean, disc_registry, mon_registry, disc_model, mon_model
-        )
+        # 3. Gemini AI Tool-Calling OR Algorithmic Reasoning
+        ai_res = self._reason_with_gemini_ai(query_clean, active_api_key, disc_registry, mon_registry) if active_api_key else None
 
-        # 4. Synthesize natural language answer with source explanation & zero hallucination
+        if ai_res:
+            results, reason, queried_sources, health_summary = ai_res
+        else:
+            results, reason, queried_sources, health_summary = self._rule_reason_and_execute(
+                query_clean, disc_registry, mon_registry, disc_model, mon_model
+            )
+
+        # 4. Synthesize response
         answer_text = self._synthesize_answer(
-            query_clean, results, reason, queried_sources, health_summary, len(disc_model.correlated)
+            query_clean, results, reason, queried_sources, health_summary, len(disc_model.correlated), active_api_key
         )
 
         return {
@@ -66,8 +74,120 @@ class CPIDiscoveryAgent:
             "matched_count": len(results) if isinstance(results, list) else 0,
             "results": results if isinstance(results, list) else [],
             "health_summary": health_summary,
-            "sources_checked": queried_sources
+            "sources_checked": queried_sources,
+            "ai_powered": bool(active_api_key)
         }
+
+    def _reason_with_gemini_ai(
+        self,
+        query: str,
+        api_key: str,
+        disc_registry: CPIDiscoveryToolRegistry,
+        mon_registry: CPIMonitoringToolRegistry
+    ) -> Optional[tuple[Any, str, List[str], Optional[Dict[str, Any]]]]:
+        if not api_key:
+            return None
+
+        tools_list = CPI_TOOLS_SCHEMA + CPI_MONITORING_TOOLS_SCHEMA
+        prompt = f"""
+You are the Lead SAP CPI AI Tool Selection Engine.
+Analyze the user's natural language question and select the exact tool function to call with appropriate arguments.
+
+User Question: "{query}"
+
+Available Tools:
+{json.dumps(tools_list, indent=2)}
+
+Return ONLY a valid JSON object matching:
+{{
+  "tool_name": "<name of selected tool>",
+  "args": {{ ... arguments for selected tool ... }}
+}}
+"""
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                text_out = resp_data["candidates"][0]["content"]["parts"][0]["text"]
+                json_match = re.search(r"\{.*\}", text_out, re.DOTALL)
+                if json_match:
+                    call_json = json.loads(json_match.group(0))
+                    tool_name = call_json.get("tool_name")
+                    args = call_json.get("args") or {}
+                    
+                    return self._execute_tool_by_name(tool_name, args, disc_registry, mon_registry)
+        except Exception as ex_ai:
+            logger.warning(f"Gemini Tool Reasoning note: {ex_ai}")
+
+        return None
+
+    def _execute_tool_by_name(
+        self,
+        tool_name: str,
+        args: Dict[str, Any],
+        disc_registry: CPIDiscoveryToolRegistry,
+        mon_registry: CPIMonitoringToolRegistry
+    ) -> tuple[Any, str, List[str], Optional[Dict[str, Any]]]:
+        sources = ["IntegrationDesigntimeArtifacts", "IntegrationRuntimeArtifacts", "IntegrationPackages"]
+
+        if tool_name == "generate_tenant_health_report":
+            sources.extend(["MessageProcessingLogs", "KeystoreEntries"])
+            report = mon_registry.generate_tenant_health_report()
+            return [], "Gemini AI: Tenant Health Report", sources, report
+
+        if tool_name == "get_keystore_entries":
+            sources.append("KeystoreEntries")
+            certs = mon_registry.get_keystore_entries(
+                max_days_to_expiry=args.get("max_days_to_expiry"),
+                risk_status=args.get("risk_status")
+            )
+            return certs, f"Gemini AI Tool ('{tool_name}')", sources, None
+
+        if tool_name == "get_failure_statistics":
+            sources.append("MessageProcessingLogs")
+            stats = mon_registry.get_failure_statistics(
+                iflow_name=args.get("iflow_name"),
+                date_expression=args.get("date_expression", "last 7 days"),
+                min_failure_rate=args.get("min_failure_rate", 0.0)
+            )
+            return stats["iflow_breakdown"], f"Gemini AI Tool ('{tool_name}')", sources, None
+
+        if tool_name == "analyze_error_patterns":
+            sources.append("MessageProcessingLogs")
+            patterns = mon_registry.analyze_error_patterns(
+                date_expression=args.get("date_expression", "last 7 days")
+            )
+            return patterns["error_patterns"], f"Gemini AI Tool ('{tool_name}')", sources, None
+
+        if tool_name == "compare_failure_trends":
+            sources.append("MessageProcessingLogs")
+            trend = mon_registry.compare_failure_trends(iflow_name=args.get("iflow_name"))
+            return [], f"Gemini AI Tool ('{tool_name}'): {trend['assessment']}", sources, None
+
+        if tool_name == "list_packages":
+            pkgs = disc_registry.list_packages(search_term=args.get("search_term"))
+            return pkgs, f"Gemini AI Tool ('{tool_name}')", sources, None
+
+        if tool_name == "filter_and_correlate_artifacts":
+            filtered, reason = disc_registry.filter_and_correlate_artifacts(
+                adapter_type=args.get("adapter_type"),
+                package_term=args.get("package_term"),
+                is_deployed=args.get("is_deployed"),
+                artifact_type=args.get("artifact_type"),
+                date_expression=args.get("date_expression"),
+                limit=args.get("limit", 100)
+            )
+            return filtered, f"Gemini AI Tool ('{tool_name}'): {reason}", sources, None
+
+        filtered, reason = disc_registry.filter_and_correlate_artifacts()
+        return filtered, f"Gemini AI Tool Executed: '{tool_name}'", sources, None
 
     def _fetch_all_cpi_apis(
         self,
@@ -149,7 +269,7 @@ class CPIDiscoveryAgent:
         ]
         return pkgs, dt, rt, ep, mpl, keystore
 
-    def _reason_and_execute(
+    def _rule_reason_and_execute(
         self,
         query: str,
         disc_registry: CPIDiscoveryToolRegistry,
@@ -159,15 +279,12 @@ class CPIDiscoveryAgent:
     ) -> tuple[Any, str, List[str], Optional[Dict[str, Any]]]:
         q_lower = query.lower()
         sources = ["IntegrationDesigntimeArtifacts", "IntegrationRuntimeArtifacts", "IntegrationPackages"]
-        health_summary = None
 
-        # 1. Tenant Health Report / Attention Items
         if any(h in q_lower for h in ["health", "worry", "attention", "top 5 problems", "tenant report"]):
             sources.extend(["MessageProcessingLogs", "KeystoreEntries"])
             report = mon_registry.generate_tenant_health_report()
             return [], "CPI Tenant Health Assessment", sources, report
 
-        # 2. Certificate Monitoring Queries
         if any(c in q_lower for c in ["certificate", "keystore", "expiry", "expire", "expired"]):
             sources.append("KeystoreEntries")
             max_days = 30
@@ -175,32 +292,22 @@ class CPIDiscoveryAgent:
                 max_days = 7
             elif "expired" in q_lower:
                 max_days = 0
-
             certs = mon_registry.get_keystore_entries(max_days_to_expiry=max_days)
             return certs, f"Keystore certificates expiring within {max_days} days", sources, None
 
-        # 3. Message Processing Log (MPL) & Failure Queries
         if any(m in q_lower for m in ["failure", "failed", "error", "mpl", "messages", "trend", "rate"]):
             sources.append("MessageProcessingLogs")
-            
-            date_expr = "last 7 days"
-            if "24h" in q_lower or "24 hours" in q_lower or "today" in q_lower:
-                date_expr = "today"
-            elif "30 days" in q_lower or "month" in q_lower:
-                date_expr = "last 30 days"
-
+            date_expr = "today" if ("24h" in q_lower or "today" in q_lower) else "last 7 days"
             if "trend" in q_lower or "compare" in q_lower:
                 trend = mon_registry.compare_failure_trends()
                 return [], f"Failure trend analysis ({trend['assessment']})", sources, None
-
-            if "pattern" in q_lower or "common" in q_lower or "root cause" in q_lower:
+            if "pattern" in q_lower or "common" in q_lower:
                 patterns = mon_registry.analyze_error_patterns(date_expression=date_expr)
-                return patterns["error_patterns"], f"Error patterns analysis ({date_expr})", sources, None
+                return patterns["error_patterns"], f"Error patterns ({date_expr})", sources, None
 
             stats = mon_registry.get_failure_statistics(date_expression=date_expr)
             return stats["iflow_breakdown"], f"Message failure statistics ({date_expr})", sources, None
 
-        # 4. Cross-Domain Correlation / Designtime & Runtime Filtering
         date_expr = None
         for dterm in ["recently", "today", "yesterday", "last 7 days", "last 30 days", "this month", "last month"]:
             if dterm in q_lower:
@@ -234,7 +341,6 @@ class CPIDiscoveryAgent:
             artifact_type=art_type,
             date_expression=date_expr
         )
-
         return filtered, reason, sources, None
 
     def _synthesize_answer(
@@ -244,16 +350,15 @@ class CPIDiscoveryAgent:
         reason: str,
         queried_sources: List[str],
         health_summary: Optional[Dict[str, Any]],
-        total_count: int
+        total_count: int,
+        api_key: Optional[str] = None
     ) -> str:
-        # Check for un-supported API data requests
         unsupported = ["database password", "cpu utilization", "ram usage", "host os key", "private rsa secret"]
         if any(u in query.lower() for u in unsupported):
             return "This information is not available from the current CPI API data."
 
         sources_bullets = "\n".join([f"- `{src}`" for src in queried_sources])
 
-        # Health Report Output Format
         if health_summary:
             crit = "\n".join([f"• 🔴 {item}" for item in health_summary.get("critical_items", [])]) or "• None"
             warn = "\n".join([f"• 🟠 {item}" for item in health_summary.get("warning_items", [])]) or "• None"
@@ -270,27 +375,26 @@ class CPIDiscoveryAgent:
                 f"**I checked:**\n{sources_bullets}"
             )
 
-        # Call Gemini AI if key available
-        if self.api_key:
+        if api_key:
             try:
                 prompt = f"""
-You are the SAP CPI Autonomous Agent.
-Answer the user's question based strictly on the retrieved SAP CPI OData API data.
+You are the Lead SAP CPI Autonomous Agent.
+Answer the user's question based strictly on the retrieved SAP CPI API results.
 
 User Question: "{query}"
-Filter & Analytical Reasoning Applied: {reason}
-Total Scanned Tenant Context Artifacts: {total_count}
+Filter & Reasoning Applied: {reason}
+Total Scanned Context Artifacts: {total_count}
 Query Results:
 {json.dumps(results[:10] if isinstance(results, list) else results, indent=2)}
 
 Rules:
 1. Do not hallucinate or invent failure counts, cert expiry dates, deployment status, or error causes.
 2. If required info is unavailable from CPI APIs, explicitly answer: "This information is not available from the current CPI API data."
-3. Include an "I checked:" bullet list at the bottom listing the SAP CPI APIs queried.
+3. At the bottom, include an "I checked:" bullet list listing the SAP CPI APIs queried.
 
 Synthesize a clear technical response.
 """
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
                 payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
                 req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
 
