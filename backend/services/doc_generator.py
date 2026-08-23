@@ -1,31 +1,76 @@
+import os
 import io
 import re
+import sys
 import datetime
 import logging
+import subprocess
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-try:
-    import docx
-    from docx import Document
-    from docx.shared import Inches, Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.oxml import parse_xml
-    from docx.oxml.ns import nsdecls
-    HAS_DOCX = True
-except ImportError:
-    HAS_DOCX = False
-    logger.warning("python-docx is not installed. Docx generation will return a fallback warning.")
+HAS_DOCX = False
+Document = None
+Inches = None
+Pt = None
+RGBColor = None
+WD_ALIGN_PARAGRAPH = None
+WD_TABLE_ALIGNMENT = None
+parse_xml = None
+nsdecls = None
 
-def set_cell_background(cell, fill_hex: str):
-    if not HAS_DOCX:
-        return
-    tcPr = cell._tc.get_or_add_tcPr()
-    shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
-    tcPr.append(shd)
+def ensure_docx_installed() -> bool:
+    global HAS_DOCX, Document, Inches, Pt, RGBColor, WD_ALIGN_PARAGRAPH, WD_TABLE_ALIGNMENT, parse_xml, nsdecls
+    if HAS_DOCX:
+        return True
+    try:
+        import docx
+        from docx import Document as _Document
+        from docx.shared import Inches as _Inches, Pt as _Pt, RGBColor as _RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH as _WD_ALIGN_PARAGRAPH
+        from docx.enum.table import WD_TABLE_ALIGNMENT as _WD_TABLE_ALIGNMENT
+        from docx.oxml import parse_xml as _parse_xml
+        from docx.oxml.ns import nsdecls as _nsdecls
+
+        Document = _Document
+        Inches = _Inches
+        Pt = _Pt
+        RGBColor = _RGBColor
+        WD_ALIGN_PARAGRAPH = _WD_ALIGN_PARAGRAPH
+        WD_TABLE_ALIGNMENT = _WD_TABLE_ALIGNMENT
+        parse_xml = _parse_xml
+        nsdecls = _nsdecls
+
+        HAS_DOCX = True
+        return True
+    except ImportError:
+        logger.info("python-docx missing. Attempting runtime auto-installation via pip...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "python-docx"])
+            import docx
+            from docx import Document as _Document
+            from docx.shared import Inches as _Inches, Pt as _Pt, RGBColor as _RGBColor
+            from docx.enum.text import WD_ALIGN_PARAGRAPH as _WD_ALIGN_PARAGRAPH
+            from docx.enum.table import WD_TABLE_ALIGNMENT as _WD_TABLE_ALIGNMENT
+            from docx.oxml import parse_xml as _parse_xml
+            from docx.oxml.ns import nsdecls as _nsdecls
+
+            Document = _Document
+            Inches = _Inches
+            Pt = _Pt
+            RGBColor = _RGBColor
+            WD_ALIGN_PARAGRAPH = _WD_ALIGN_PARAGRAPH
+            WD_TABLE_ALIGNMENT = _WD_TABLE_ALIGNMENT
+            parse_xml = _parse_xml
+            nsdecls = _nsdecls
+
+            HAS_DOCX = True
+            logger.info("python-docx successfully installed at runtime!")
+            return True
+        except Exception as e:
+            logger.error(f"Runtime auto-install of python-docx failed: {e}")
+            return False
 
 class TechSpecGenerator:
     """Generates professional SAP CPI Technical Specification Word (.docx) documents."""
@@ -41,8 +86,8 @@ class TechSpecGenerator:
         metadata: Optional[Dict[str, Any]] = None,
         reference_docx_bytes: Optional[bytes] = None
     ) -> bytes:
-        if not HAS_DOCX:
-            raise RuntimeError("python-docx is not installed on the server environment. Please run 'pip install python-docx'.")
+        if not ensure_docx_installed():
+            raise RuntimeError("python-docx package is not available and could not be installed automatically.")
 
         iflow_name = analysis_data.get("name") or (metadata and metadata.get("name")) or "SAP iFlow"
         iflow_id = (metadata and metadata.get("id")) or iflow_name
@@ -54,6 +99,11 @@ class TechSpecGenerator:
                 logger.error(f"Failed to fill reference docx template: {e}. Falling back to standard docx synthesis.", exc_info=True)
 
         return self._build_standard_tech_spec(analysis_data, metadata, iflow_name, iflow_id)
+
+    def _set_cell_background(self, cell, fill_hex: str):
+        tcPr = cell._tc.get_or_add_tcPr()
+        shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
+        tcPr.append(shd)
 
     def _fill_reference_template(
         self,
@@ -92,7 +142,7 @@ class TechSpecGenerator:
                             if key in p.text:
                                 p.text = p.text.replace(key, val)
 
-        # 3. Append extracted dynamic analysis sections if not already present
+        # 3. Append extracted dynamic analysis sections
         doc.add_heading(f"Extracted Configuration & Test Payloads for {iflow_name}", level=1)
         self._add_config_table(doc, analysis.get("config", []))
         self._add_requirements_table(doc, "Required HTTP Headers", analysis.get("headers", []))
@@ -152,7 +202,7 @@ class TechSpecGenerator:
             r_cells = meta_table.rows[row_idx].cells
             r_cells[0].text = k
             r_cells[1].text = v
-            set_cell_background(r_cells[0], self.LIGHT_BG_HEX)
+            self._set_cell_background(r_cells[0], self.LIGHT_BG_HEX)
             for p in r_cells[0].paragraphs:
                 for r in p.runs:
                     r.font.bold = True
@@ -227,7 +277,7 @@ class TechSpecGenerator:
         hdr_titles = ["Step", "Type", "Action", "Name", "Value / Source"]
         for i, title in enumerate(hdr_titles):
             hdr_cells[i].text = title
-            set_cell_background(hdr_cells[i], self.NAVY_HEX)
+            self._set_cell_background(hdr_cells[i], self.NAVY_HEX)
             for p in hdr_cells[i].paragraphs:
                 for r in p.runs:
                     r.font.bold = True
@@ -256,7 +306,7 @@ class TechSpecGenerator:
         hdr_titles = ["Name", "Sample Value", "Mandatory?", "Notes"]
         for i, title in enumerate(hdr_titles):
             hdr_cells[i].text = title
-            set_cell_background(hdr_cells[i], self.BLUE_HEX)
+            self._set_cell_background(hdr_cells[i], self.BLUE_HEX)
             for p in hdr_cells[i].paragraphs:
                 for r in p.runs:
                     r.font.bold = True
@@ -285,7 +335,6 @@ class TechSpecGenerator:
             h3 = doc.add_heading(f"Scenario: {scenario} ({fmt})", level=2)
             doc.add_paragraph(f"Derived from schema: `{source}`")
 
-            # Code Block Box
             p_code = doc.add_paragraph()
             p_code.paragraph_format.space_before = Pt(4)
             p_code.paragraph_format.space_after = Pt(12)
