@@ -1,7 +1,8 @@
 import logging
 import datetime
 from typing import Dict, Any, List, Optional
-from backend.services.cpi_monitoring_model import CPIMonitoringModel, parse_relative_date_range
+from backend.services.cpi_monitoring_model import CPIMonitoringModel
+from backend.services.cpi_structured_query import calculate_exact_time_range
 
 logger = logging.getLogger(__name__)
 
@@ -9,13 +10,13 @@ logger = logging.getLogger(__name__)
 CPI_MONITORING_TOOLS_SCHEMA = [
     {
         "name": "search_mpl",
-        "description": "Searches SAP CPI Message Processing Logs (MPL) by iFlow name, execution status (FAILED, COMPLETED), or relative date range (e.g. 'today', 'last 24 hours', 'last 7 days').",
+        "description": "Searches SAP CPI Message Processing Logs (MPL) by iFlow name, execution status (FAILED, COMPLETED), or relative date range (e.g. 'last 24 hours', 'last 6 hours', 'today', 'last 7 days').",
         "parameters": {
             "type": "object",
             "properties": {
                 "iflow_name": {"type": "string", "description": "Filter logs for a specific iFlow name or keyword"},
                 "status": {"type": "string", "description": "Filter logs by execution status: 'FAILED' or 'COMPLETED'"},
-                "date_expression": {"type": "string", "description": "Relative date expression: 'today', 'last 24 hours', 'last 7 days', 'last 30 days'"}
+                "date_expression": {"type": "string", "description": "Relative date expression: 'last 24 hours', 'last 6 hours', 'today', 'last 7 days', 'last 30 days'"}
             }
         }
     },
@@ -26,7 +27,7 @@ CPI_MONITORING_TOOLS_SCHEMA = [
             "type": "object",
             "properties": {
                 "iflow_name": {"type": "string", "description": "Optional iFlow name filter"},
-                "date_expression": {"type": "string", "description": "Relative date range: 'today', 'last 24 hours', 'last 7 days', 'last 30 days'"},
+                "date_expression": {"type": "string", "description": "Relative date range: 'last 24 hours', 'last 6 hours', 'today', 'last 7 days', 'last 30 days'"},
                 "min_failure_rate": {"type": "number", "description": "Filter iFlows having a failure rate percentage greater than min_failure_rate (e.g. 10.0 for > 10%)"}
             }
         }
@@ -37,7 +38,7 @@ CPI_MONITORING_TOOLS_SCHEMA = [
         "parameters": {
             "type": "object",
             "properties": {
-                "date_expression": {"type": "string", "description": "Relative date range: 'today', 'last 24 hours', 'last 7 days'"}
+                "date_expression": {"type": "string", "description": "Relative date range: 'last 24 hours', 'today', 'last 7 days'"}
             }
         }
     },
@@ -79,34 +80,54 @@ class CPIMonitoringToolRegistry:
     def __init__(self, model: CPIMonitoringModel):
         self.model = model
 
-    def search_mpl(self, iflow_name: str = None, status: str = None, date_expression: str = "last 7 days") -> List[Dict[str, Any]]:
-        start_dt, end_dt, label = parse_relative_date_range(date_expression)
-        logs = self.model.mpl_records
+    def search_mpl(
+        self,
+        iflow_name: str = None,
+        status: str = None,
+        date_expression: str = None,
+        start_time: Optional[datetime.datetime] = None,
+        end_time: Optional[datetime.datetime] = None
+    ) -> tuple[List[Dict[str, Any]], str]:
+        if start_time and end_time:
+            start_dt, end_dt = start_time, end_time
+            label = f"{start_dt.strftime('%Y-%m-%d %H:%M')} to {end_dt.strftime('%Y-%m-%d %H:%M')} UTC"
+        else:
+            tr = calculate_exact_time_range(date_expression or "last 7 days")
+            start_dt, end_dt, label = tr.start_time, tr.end_time, tr.label
 
-        # Filter by Date
+        logs = self.model.mpl_records
         logs = [l for l in logs if start_dt <= l["log_dt"] <= end_dt]
 
-        # Filter by iFlow name
         if iflow_name:
             if_lower = iflow_name.lower().strip()
             logs = [l for l in logs if if_lower in l["iflow_name"].lower()]
 
-        # Filter by Status
         if status:
             st = status.upper().strip()
             logs = [l for l in logs if l["status"] == st]
 
-        return logs
+        return logs, label
 
-    def get_failure_statistics(self, iflow_name: str = None, date_expression: str = "last 7 days", min_failure_rate: float = 0.0) -> Dict[str, Any]:
-        logs = self.search_mpl(iflow_name=iflow_name, date_expression=date_expression)
+    def get_failure_statistics(
+        self,
+        iflow_name: str = None,
+        date_expression: str = None,
+        start_time: Optional[datetime.datetime] = None,
+        end_time: Optional[datetime.datetime] = None,
+        min_failure_rate: float = 0.0
+    ) -> Dict[str, Any]:
+        logs, label = self.search_mpl(
+            iflow_name=iflow_name,
+            date_expression=date_expression,
+            start_time=start_time,
+            end_time=end_time
+        )
         
         total_msgs = len(logs)
         failed_msgs = sum(1 for l in logs if l["status"] == "FAILED")
         success_msgs = total_msgs - failed_msgs
         overall_failure_rate = (failed_msgs / total_msgs * 100.0) if total_msgs > 0 else 0.0
 
-        # Group by iFlow
         iflow_stats: Dict[str, Dict[str, Any]] = {}
         for l in logs:
             ifname = l["iflow_name"]
@@ -135,7 +156,7 @@ class CPIMonitoringToolRegistry:
         top_failing_iflows = sorted(top_failing_iflows, key=lambda x: (x["failed"], x["failure_rate"]), reverse=True)
 
         return {
-            "period": date_expression,
+            "period_label": label,
             "total_messages": total_msgs,
             "successful_messages": success_msgs,
             "failed_messages": failed_msgs,
@@ -143,8 +164,18 @@ class CPIMonitoringToolRegistry:
             "iflow_breakdown": top_failing_iflows
         }
 
-    def analyze_error_patterns(self, date_expression: str = "last 7 days") -> Dict[str, Any]:
-        failed_logs = self.search_mpl(status="FAILED", date_expression=date_expression)
+    def analyze_error_patterns(
+        self,
+        date_expression: str = None,
+        start_time: Optional[datetime.datetime] = None,
+        end_time: Optional[datetime.datetime] = None
+    ) -> Dict[str, Any]:
+        failed_logs, label = self.search_mpl(
+            status="FAILED",
+            date_expression=date_expression,
+            start_time=start_time,
+            end_time=end_time
+        )
         
         pattern_counts: Dict[str, int] = {}
         for l in failed_logs:
@@ -157,7 +188,7 @@ class CPIMonitoringToolRegistry:
         ]
 
         return {
-            "period": date_expression,
+            "period_label": label,
             "total_failures_analyzed": len(failed_logs),
             "error_patterns": sorted_patterns
         }
@@ -175,16 +206,18 @@ class CPIMonitoringToolRegistry:
         return certs
 
     def compare_failure_trends(self, iflow_name: str = None) -> Dict[str, Any]:
-        logs_current = self.search_mpl(iflow_name=iflow_name, date_expression="last 7 days")
-        logs_previous = self.search_mpl(iflow_name=iflow_name, date_expression="last 30 days")
+        logs_current, label_curr = self.search_mpl(iflow_name=iflow_name, date_expression="last 24 hours")
+        logs_previous, label_prev = self.search_mpl(iflow_name=iflow_name, date_expression="last 48 hours")
 
         current_fails = sum(1 for l in logs_current if l["status"] == "FAILED")
-        # Subtract current 7 days from last 30 days to get previous period
-        previous_fails = max(0, sum(1 for l in logs_previous if l["status"] == "FAILED") - current_fails)
+        prev_48_fails = sum(1 for l in logs_previous if l["status"] == "FAILED")
+        previous_fails = max(0, prev_48_fails - current_fails)
 
         pct_change = 0.0
         if previous_fails > 0:
             pct_change = ((current_fails - previous_fails) / previous_fails) * 100.0
+        elif current_fails > 0:
+            pct_change = 100.0
 
         assessment = "Stable failure rate"
         if pct_change > 20.0:
@@ -194,6 +227,8 @@ class CPIMonitoringToolRegistry:
 
         return {
             "iflow_target": iflow_name or "Tenant-wide",
+            "current_period_label": label_curr,
+            "previous_period_label": "Previous 24 Hours",
             "current_period_failures": current_fails,
             "previous_period_failures": previous_fails,
             "percentage_change": round(pct_change, 1),
@@ -201,23 +236,21 @@ class CPIMonitoringToolRegistry:
         }
 
     def generate_tenant_health_report(self) -> Dict[str, Any]:
-        stats_today = self.get_failure_statistics(date_expression="today")
+        stats_today = self.get_failure_statistics(date_expression="last 24 hours")
         stats_week = self.get_failure_statistics(date_expression="last 7 days")
         expiring_critical_certs = self.get_keystore_entries(max_days_to_expiry=7)
         expiring_warning_certs = self.get_keystore_entries(max_days_to_expiry=30)
-        patterns = self.analyze_error_patterns(date_expression="today")
+        patterns = self.analyze_error_patterns(date_expression="last 24 hours")
 
         critical_items = []
         warning_items = []
         healthy_items = []
 
-        # Certs evaluation
         if expiring_critical_certs:
             critical_items.append(f"{len(expiring_critical_certs)} certificate(s) expire within 7 days (or expired)")
         elif expiring_warning_certs:
             warning_items.append(f"{len(expiring_warning_certs)} certificate(s) expire within 30 days")
 
-        # High Failure Rate evaluation
         high_fail_iflows = [b for b in stats_week["iflow_breakdown"] if b["failure_rate"] >= 20.0]
         mod_fail_iflows = [b for b in stats_week["iflow_breakdown"] if 5.0 <= b["failure_rate"] < 20.0]
 

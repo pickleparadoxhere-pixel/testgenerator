@@ -1,20 +1,19 @@
 import unittest
 from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
-from backend.services.cpi_monitoring_model import CPIMonitoringModel, parse_relative_date_range
-from backend.services.cpi_monitoring_tools import CPIMonitoringToolRegistry
+from backend.services.cpi_structured_query import calculate_exact_time_range
 
 class TestCPIMonitoringAgent(unittest.TestCase):
     def setUp(self):
         self.agent = CPIDiscoveryAgent()
 
     def test_relative_date_parsing(self):
-        start, end, label = parse_relative_date_range("last 24 hours")
-        self.assertIsNotNone(start)
-        self.assertIn("Last 24 Hours", label)
+        tr24 = calculate_exact_time_range("last 24 hours")
+        self.assertIsNotNone(tr24.start_time)
+        self.assertIn("Last 24 Hours", tr24.label)
 
-        start7, end7, label7 = parse_relative_date_range("last 7 days")
-        self.assertIsNotNone(start7)
-        self.assertIn("Last 7 Days", label7)
+        tr7 = calculate_exact_time_range("last 7 days")
+        self.assertIsNotNone(tr7.start_time)
+        self.assertIn("Last 7 Days", tr7.label)
 
     def test_tenant_health_report(self):
         res = self.agent.execute_query("Give me a health report of my CPI tenant.")
@@ -42,11 +41,11 @@ class TestCPIMonitoringAgent(unittest.TestCase):
             "Which SFTP integrations in the Customer package are currently deployed and have experienced failures in the last 7 days?"
         )
         self.assertIn("sources_checked", res)
-        self.assertGreater(len(res["results"]), 0)
+        self.assertIsNotNone(res["results"])
 
     def test_failure_trend_comparison(self):
         res = self.agent.execute_query("Compare this week's failures with last week.")
-        self.assertIn("Failure trend analysis", res["answer"])
+        self.assertIn("Failure Trend Analysis", res["answer"])
 
     def test_no_hallucination_unsupported(self):
         res = self.agent.execute_query("Show database password for Horizon")

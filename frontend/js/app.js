@@ -623,31 +623,107 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!discoveryResultsBox) return;
     discoveryResultsBox.style.display = "block";
 
+    const discoveryThead = document.getElementById("discoveryThead");
+    const queryType = data.query_type || "ARTIFACTS_LIST";
+
+    // Format bold markdown tags in answer
     let formattedAnswer = escapeHtml(data.answer || "")
-      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      .replace(/### (.*?)\n/g, "<h3>$1</h3>")
+      .replace(/• (.*?)\n/g, "• $1<br>")
+      .replace(/\n\n/g, "<br><br>");
     agentAnswerText.innerHTML = formattedAnswer;
 
     discoveryTbody.innerHTML = "";
-    const results = data.results || [];
-    if (results.length === 0) {
-      discoveryTbody.innerHTML = `<tr><td colspan="7" class="hint">No matching artifacts found.</td></tr>`;
+    const results = data.table_data || data.results || [];
+
+    // 1. STATISTIC / HEALTH_REPORT (No table needed if count or summary)
+    if (queryType === "STATISTIC" || queryType === "HEALTH_REPORT" || results.length === 0) {
+      if (discoveryThead) discoveryThead.style.display = "none";
       return;
     }
 
+    if (discoveryThead) discoveryThead.style.display = "table-header-group";
+
+    // 2. METRIC_BREAKDOWN (Failure Statistics / Rankings)
+    if (queryType === "METRIC_BREAKDOWN") {
+      discoveryThead.innerHTML = `
+        <tr>
+          <th>iFlow Name</th>
+          <th>Total Messages</th>
+          <th>Failed Messages</th>
+          <th>Successful Messages</th>
+          <th>Failure Rate</th>
+        </tr>
+      `;
+      results.forEach(item => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(item.iflow_name || "")}</strong></td>
+          <td>${item.total || 0}</td>
+          <td><span class="badge badge-error">${item.failed || 0}</span></td>
+          <td><span class="badge badge-success">${item.success || 0}</span></td>
+          <td><strong>${item.failure_rate || 0}%</strong></td>
+        `;
+        discoveryTbody.appendChild(tr);
+      });
+      return;
+    }
+
+    // 3. CERTIFICATES
+    if (queryType === "CERTIFICATES") {
+      discoveryThead.innerHTML = `
+        <tr>
+          <th>Alias</th>
+          <th>Type</th>
+          <th>Owner</th>
+          <th>Valid Until</th>
+          <th>Days Remaining</th>
+          <th>Risk Status</th>
+        </tr>
+      `;
+      results.forEach(item => {
+        const tr = document.createElement("tr");
+        const isCrit = item.risk_status === "CRITICAL" || item.risk_status === "EXPIRED";
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(item.alias || "")}</strong></td>
+          <td><span class="badge">${escapeHtml(item.type || "KeyPair")}</span></td>
+          <td>${escapeHtml(item.owner || "Tenant")}</td>
+          <td>${escapeHtml(item.valid_until ? item.valid_until.substring(0, 10) : "")}</td>
+          <td><strong>${item.days_remaining} days</strong></td>
+          <td><span class="badge ${isCrit ? 'badge-error' : 'badge-success'}">${item.risk_status}</span></td>
+        `;
+        discoveryTbody.appendChild(tr);
+      });
+      return;
+    }
+
+    // 4. ARTIFACTS_LIST (Default)
+    discoveryThead.innerHTML = `
+      <tr>
+        <th>Artifact ID</th>
+        <th>Name</th>
+        <th>Version</th>
+        <th>Package</th>
+        <th>Status</th>
+        <th>Adapters / Tech</th>
+        <th>Action</th>
+      </tr>
+    `;
     results.forEach(item => {
       const tr = document.createElement("tr");
-      const adaptersStr = (item.adapters || []).map(ad => `<span class="badge">${ad}</span>`).join(" ");
-      const isDeployed = item.status === "DEPLOYED";
+      const adaptersStr = (item.adapters || []).map(ad => `<span class="badge">${escapeHtml(ad)}</span>`).join(" ");
+      const isDeployed = item.status === "DEPLOYED" || item.is_deployed;
 
       tr.innerHTML = `
-        <td><strong>${item.id}</strong></td>
-        <td>${item.name || item.id}</td>
-        <td><span class="badge">${item.version || "1.0.0"}</span></td>
-        <td>${item.package_id || "DefaultPackage"}</td>
-        <td><span class="badge ${isDeployed ? 'badge-success' : ''}">${item.status || 'DESIGNTIME'}</span></td>
+        <td><strong>${escapeHtml(item.id || "")}</strong></td>
+        <td>${escapeHtml(item.name || item.id || "")}</td>
+        <td><span class="badge">${escapeHtml(item.version || "1.0.0")}</span></td>
+        <td>${escapeHtml(item.package_id || item.package_name || "DefaultPackage")}</td>
+        <td><span class="badge ${isDeployed ? 'badge-success' : ''}">${item.runtime_status || item.status || 'DESIGNTIME'}</span></td>
         <td>${adaptersStr || '<span class="badge">HTTPS</span>'}</td>
         <td>
-          <button class="btn btn-secondary btn-sm btn-disc-analyze" data-id="${item.id}">
+          <button class="btn btn-secondary btn-sm btn-disc-analyze" data-id="${escapeHtml(item.id || "")}">
             <span>⚡</span> Analyze & Payloads
           </button>
         </td>

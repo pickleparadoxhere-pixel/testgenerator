@@ -119,5 +119,19 @@ class TestSAPCPIAgent(unittest.TestCase):
         res3 = agent.execute_query("Which certificates expire within 30 days?")
         self.assertIn("KeystoreEntries", res3["sources_checked"])
 
+    def test_cpi_acceptance_criteria(self):
+        from backend.services.cpi_discovery_agent import CPIDiscoveryAgent
+        agent = CPIDiscoveryAgent()
+        
+        # Test 1: 24h Failure Count returns STATISTIC without arbitrary artifact table
+        res1 = agent.execute_query("how many failures in last 24 hours?")
+        self.assertEqual(res1["query_type"], "STATISTIC")
+        self.assertEqual(len(res1["table_data"]), 0)
+
+        # Test 2: 6h Failure Count returns STATISTIC with 6h label
+        res2 = agent.execute_query("how many failures in last 6 hours?")
+        self.assertEqual(res2["query_type"], "STATISTIC")
+        self.assertIn("Last 6 Hours", res2["statistics"]["period_label"])
+
 if __name__ == "__main__":
     unittest.main()
