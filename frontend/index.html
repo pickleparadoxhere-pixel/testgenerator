@@ -44,60 +44,7 @@
       <p class="intro">Upload a design-time ZIP or connect your tenant. The analyzer inventories the package, reconstructs the flow, detects required headers and properties, and generates schema-derived XML or JSON payloads.</p>
     </div>
 
-    <!-- Section 1: Connect Tenant / Upload IFlow -->
-    <section class="panel" id="section-input">
-      <div class="panel-header">
-        <h2>1. Import & Select IFlow Artifact</h2>
-        <p class="panel-desc">Fetch from your SAP CPI tenant OData API or drop local exported ZIP packages.</p>
-      </div>
-
-      <!-- Live Tenant iFlows Table (populated when connected) -->
-      <div id="liveArtifactsContainer" class="live-artifacts-box" style="display: none;">
-        <div class="box-header">
-          <h3>Deployed Tenant iFlows</h3>
-          <span id="liveArtifactCount" class="badge">0 found</span>
-        </div>
-        <div class="table-responsive">
-          <table class="artifact-table">
-            <thead>
-              <tr>
-                <th>Select</th>
-                <th>Artifact ID</th>
-                <th>Name</th>
-                <th>Version</th>
-                <th>Package</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="liveArtifactsTbody">
-              <!-- Dynamically populated -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Drag & Drop Zone -->
-      <div id="dropZone" class="drop-zone">
-        <div class="drop-icon">📁</div>
-        <div class="drop-text">
-          <label for="fileInput" class="choose-btn">Choose ZIP Files</label>
-          <label for="dirInput" class="choose-btn btn-secondary">Choose Folder</label>
-          <input type="file" id="fileInput" multiple accept=".zip">
-          <input type="file" id="dirInput" webkitdirectory multiple>
-        </div>
-        <div id="dropFilename" class="drop-filename">or drag & drop ZIP files here</div>
-        <div class="hint">Supports .ZIP bundles exported from SAP CPI. Max upload size: 100 MB.</div>
-      </div>
-
-      <div class="panel-actions">
-        <button id="btnAnalyze" class="btn btn-primary btn-lg" disabled>
-          <span>⚡</span> Analyze IFlow & Generate Payloads
-        </button>
-        <span id="analyzeStatus" class="status-msg"></span>
-      </div>
-    </section>
-
-    <!-- CPI Discovery Agent Section -->
+    <!-- CPI Discovery Agent Section (Top Priority) -->
     <section class="panel discovery-panel" id="section-discovery">
       <div class="panel-header">
         <h2>🔍 CPI Discovery Agent</h2>
@@ -150,6 +97,59 @@
             </tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- Section 1: Connect Tenant / Upload IFlow -->
+    <section class="panel" id="section-input">
+      <div class="panel-header">
+        <h2>1. Import & Select IFlow Artifact</h2>
+        <p class="panel-desc">Fetch from your SAP CPI tenant OData API or drop local exported ZIP packages.</p>
+      </div>
+
+      <!-- Live Tenant iFlows Table (populated when connected) -->
+      <div id="liveArtifactsContainer" class="live-artifacts-box" style="display: none;">
+        <div class="box-header">
+          <h3>Deployed Tenant iFlows</h3>
+          <span id="liveArtifactCount" class="badge">0 found</span>
+        </div>
+        <div class="table-responsive">
+          <table class="artifact-table">
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>Artifact ID</th>
+                <th>Name</th>
+                <th>Version</th>
+                <th>Package</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="liveArtifactsTbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Drag & Drop Zone -->
+      <div id="dropZone" class="drop-zone">
+        <div class="drop-icon">📁</div>
+        <div class="drop-text">
+          <label for="fileInput" class="choose-btn">Choose ZIP Files</label>
+          <label for="dirInput" class="choose-btn btn-secondary">Choose Folder</label>
+          <input type="file" id="fileInput" multiple accept=".zip">
+          <input type="file" id="dirInput" webkitdirectory multiple>
+        </div>
+        <div id="dropFilename" class="drop-filename">or drag & drop ZIP files here</div>
+        <div class="hint">Supports .ZIP bundles exported from SAP CPI. Max upload size: 100 MB.</div>
+      </div>
+
+      <div class="panel-actions">
+        <button id="btnAnalyze" class="btn btn-primary btn-lg" disabled>
+          <span>⚡</span> Analyze IFlow & Generate Payloads
+        </button>
+        <span id="analyzeStatus" class="status-msg"></span>
       </div>
     </section>
 
