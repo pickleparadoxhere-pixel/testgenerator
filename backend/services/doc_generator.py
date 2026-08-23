@@ -2,6 +2,7 @@ import os
 import io
 import re
 import sys
+import json
 import datetime
 import logging
 import subprocess
@@ -101,7 +102,7 @@ class TechSpecGenerator:
     CODE_BG_HEX = "07101D"
 
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("PALM_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
     def generate_tech_spec(
         self,
@@ -115,7 +116,7 @@ class TechSpecGenerator:
         iflow_name = analysis_data.get("name") or (metadata and metadata.get("name")) or "SAP iFlow"
         iflow_id = (metadata and metadata.get("id")) or iflow_name
 
-        # Extract text from reference document if provided
+        # Extract reference document text if available
         reference_text = ""
         if reference_docx_bytes and len(reference_docx_bytes) > 200:
             try:
@@ -125,18 +126,18 @@ class TechSpecGenerator:
             except Exception as ex_ref:
                 logger.warning(f"Could not extract reference text: {ex_ref}")
 
-        # Synthesize AI Technical Content
-        ai_content = self._generate_ai_spec_content(analysis_data, metadata, reference_text)
+        # Synthesize AI / Rule-based technical prose
+        ai_content = self._synthesize_technical_prose(analysis_data, metadata, reference_text)
 
         if reference_docx_bytes and len(reference_docx_bytes) > 200:
             try:
-                return self._fill_reference_template(reference_docx_bytes, analysis_data, metadata, ai_content)
+                return self._overhaul_fill_reference_doc(reference_docx_bytes, analysis_data, metadata, ai_content)
             except Exception as e:
                 logger.error(f"Failed to fill reference docx template: {e}. Falling back to standard docx synthesis.", exc_info=True)
 
         return self._build_standard_tech_spec(analysis_data, metadata, iflow_name, iflow_id, ai_content)
 
-    def _generate_ai_spec_content(
+    def _synthesize_technical_prose(
         self,
         analysis: Dict[str, Any],
         metadata: Optional[Dict[str, Any]],
@@ -146,48 +147,61 @@ class TechSpecGenerator:
         iflow_id = (metadata and metadata.get("id")) or iflow_name
         sender = analysis.get("sender") or "HTTPS Sender Adapter"
         receiver = analysis.get("receiver") or "Target Receiver System"
-        steps = ", ".join(analysis.get("steps", []))
+        steps_list = analysis.get("steps", [])
+        steps_str = ", ".join(steps_list) if steps_list else "HTTPS Adapter, Content Modifier, Message Mapping, Request-Reply"
+        inventory = analysis.get("inventory", {})
+        groovy_scripts = inventory.get("Groovy Scripts", [])
+        schemas = inventory.get("XML Schemas / WSDLs", [])
 
-        # Default rule-based content
+        # Detailed algorithmic synthesis
+        summary_prose = (
+            f"This technical specification provides the complete end-to-end interface design, "
+            f"BPMN process sequence, extracted configuration parameters, mandatory HTTP headers, "
+            f"and schema-derived test payloads for the SAP Integration Suite iFlow '{iflow_name}' (Technical ID: {iflow_id}). "
+            f"The interface processes inbound payload triggers from '{sender}' and delivers validated, transformed message payloads to '{receiver}'."
+        )
+
+        architecture_prose = (
+            f"The interface implements an enterprise message processing flow consisting of {len(steps_list) or 4} key processing steps: "
+            f"{steps_str}. "
+            f"Inbound HTTP/REST requests are validated against defined XML/JSON schemas. "
+            f"Groovy script transformations ({', '.join(groovy_scripts) if groovy_scripts else 'Standard mapping scripts'}) "
+            f"execute message modification and dynamic header population prior to target dispatch."
+        )
+
+        error_prose = (
+            f"Runtime processing failures trigger the iFlow Exception Subprocess. "
+            f"The integration engine captures the fault traceback, populates an SAP Message Processing Log ID (MPL ID) "
+            f"header ('sap_messageprocessinglogid'), and logs error details for end-to-end monitoring and support."
+        )
+
         default_content = {
-            "summary": (
-                f"This technical specification defines the integration architecture, execution flow, data mapping rules, "
-                f"and test payloads for the SAP Integration Suite iFlow '{iflow_name}' (ID: {iflow_id}). "
-                f"The interface receives inbound messages from '{sender}' and routes processed payloads to '{receiver}'."
-            ),
-            "architecture": (
-                f"The interface follows an asynchronous/synchronous enterprise message exchange pattern. "
-                f"Inbound requests arrive at the HTTPS sender adapter, undergo payload validation and Groovy transformation, "
-                f"and execute message mappings before delivering to target receiver endpoints."
-            ),
-            "error_handling": (
-                f"Exceptions occurring during message processing are captured by the SAP CPI Exception Subprocess. "
-                f"The system logs an SAP Message Processing Log ID (MPL ID) for end-to-end trace logging and observability."
-            )
+            "summary": summary_prose,
+            "architecture": architecture_prose,
+            "error_handling": error_prose
         }
 
         if not self.api_key:
             return default_content
 
-        # Call Gemini AI for rich architectural content synthesis
+        # Call Gemini AI if API key is provided
         try:
             prompt = f"""
-You are a Lead SAP CPI Integration Architect.
-Generate technical specification documentation content for the following SAP CPI iFlow artifact:
+You are a Lead SAP CPI Integration Architect writing an official Technical Specification Document.
+Generate detailed technical documentation sections for the following SAP CPI iFlow:
 
 iFlow Name: {iflow_name} (ID: {iflow_id})
 Sender System: {sender}
 Receiver Systems: {receiver}
-Flow Sequence Steps: {steps}
+Flow Sequence: {steps_str}
+Groovy Scripts: {', '.join(groovy_scripts) if groovy_scripts else 'None'}
+Schemas/WSDLs: {', '.join(schemas) if schemas else 'None'}
 
-Reference Template Context:
-{reference_text or 'Standard SAP Integration Suite Technical Specification Template'}
-
-Return a clean JSON object containing:
+Return a valid JSON object containing:
 {{
-  "summary": "Detailed 3-sentence executive summary describing business value and technical purpose.",
-  "architecture": "Detailed paragraph describing message exchange patterns, transformation logic, and receiver routing.",
-  "error_handling": "Paragraph describing exception handling, SAP MPL ID logging, and alerting rules."
+  "summary": "Rich 3-sentence executive summary.",
+  "architecture": "Detailed technical architectural description of transformation logic and routing.",
+  "error_handling": "Detailed description of error handling, SAP MPL ID tracking, and exception subprocess."
 }}
 """
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
@@ -201,17 +215,16 @@ Return a clean JSON object containing:
             with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
                 resp_data = json.loads(resp.read().decode("utf-8"))
                 text_out = resp_data["candidates"][0]["content"]["parts"][0]["text"]
-                
                 json_match = re.search(r"\{.*\}", text_out, re.DOTALL)
                 if json_match:
                     ai_json = json.loads(json_match.group(0))
                     return {
-                        "summary": ai_json.get("summary", default_content["summary"]),
-                        "architecture": ai_json.get("architecture", default_content["architecture"]),
-                        "error_handling": ai_json.get("error_handling", default_content["error_handling"])
+                        "summary": ai_json.get("summary", summary_prose),
+                        "architecture": ai_json.get("architecture", architecture_prose),
+                        "error_handling": ai_json.get("error_handling", error_prose)
                     }
         except Exception as ex_ai:
-            logger.warning(f"Gemini AI spec synthesis note: {ex_ai}. Using rule-based spec content.")
+            logger.warning(f"Gemini AI synthesis note: {ex_ai}. Using rule-based technical prose.")
 
         return default_content
 
@@ -220,13 +233,14 @@ Return a clean JSON object containing:
         shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
         tcPr.append(shd)
 
-    def _fill_reference_template(
+    def _overhaul_fill_reference_doc(
         self,
         reference_bytes: bytes,
         analysis: Dict[str, Any],
         metadata: Optional[Dict[str, Any]],
         ai_content: Dict[str, Any]
     ) -> bytes:
+        """Intelligently updates reference Word document tables, section headings, and placeholders with extracted iFlow data."""
         doc = Document(io.BytesIO(reference_bytes))
         iflow_name = analysis.get("name") or (metadata and metadata.get("name")) or "iFlow"
         iflow_id = (metadata and metadata.get("id")) or iflow_name
@@ -246,12 +260,12 @@ Return a clean JSON object containing:
             "{{TIMESTAMP}}": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
-        # 1. Replace placeholder text in all paragraphs (handles split XML runs!)
+        # 1. Replace placeholder tags in all paragraphs
         for p in doc.paragraphs:
             for key, val in replacements.items():
                 replace_text_in_paragraph(p, key, val)
 
-        # 2. Replace placeholder text in all tables
+        # 2. Inspect and replace placeholders inside existing tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -259,37 +273,92 @@ Return a clean JSON object containing:
                         for key, val in replacements.items():
                             replace_text_in_paragraph(p, key, val)
 
-        # 3. Append complete extracted iFlow technical specification sections
-        doc.add_heading(f"Extracted Technical Specifications for '{iflow_name}' (ID: {iflow_id})", level=1)
+        # 3. Match and Populate Existing Tables in Reference Document
+        configs = analysis.get("config", [])
+        headers = analysis.get("headers", [])
+        properties = analysis.get("properties", [])
+
+        for table in doc.tables:
+            if len(table.rows) == 0:
+                continue
+            hdr_text = " ".join([c.text.lower() for c in table.rows[0].cells])
+            
+            # Check if this table is a Configuration Table
+            if any(k in hdr_text for k in ["step", "kind", "property", "parameter", "value"]):
+                if configs:
+                    self._populate_reference_table_rows(table, configs, ["step", "kind", "action", "name", "value"])
+
+            # Check if this table is a Headers Table
+            elif "header" in hdr_text or "mandatory" in hdr_text:
+                if headers:
+                    self._populate_reference_table_rows(table, headers, ["name", "sample", "mandatory", "notes"])
+
+            # Check if this table is an Exchange Properties Table
+            elif "property" in hdr_text or "exchange" in hdr_text:
+                if properties:
+                    self._populate_reference_table_rows(table, properties, ["name", "sample", "mandatory", "notes"])
+
+        # 4. Append Extracted Specifications Section to complete technical spec
+        doc.add_heading(f"Extracted Specifications for '{iflow_name}' (ID: {iflow_id})", level=1)
         
-        p_desc = doc.add_paragraph()
-        p_desc.add_run(ai_content.get("summary", ""))
+        p_intro = doc.add_paragraph()
+        p_intro.add_run(ai_content.get("summary", ""))
 
-        doc.add_heading("Architecture & Error Handling", level=2)
-        doc.add_paragraph(ai_content.get("architecture", ""))
-        doc.add_paragraph(ai_content.get("error_handling", ""))
-
+        doc.add_heading("1. Interface Flow Sequence", level=2)
         steps = analysis.get("steps", [])
         if steps:
-            doc.add_heading("Execution Steps Sequence", level=2)
             for i, step in enumerate(steps, 1):
                 doc.add_paragraph(f"{i}. {step}")
+        else:
+            doc.add_paragraph(ai_content.get("architecture", ""))
 
-        doc.add_heading("Extracted Configuration Mapping Table", level=2)
-        self._add_config_table(doc, analysis.get("config", []))
+        doc.add_heading("2. Extracted Configuration Table", level=2)
+        self._add_config_table(doc, configs)
 
-        doc.add_heading("Required HTTP Headers", level=2)
-        self._add_requirements_table(doc, "Required HTTP Headers", analysis.get("headers", []))
+        doc.add_heading("3. Required HTTP Headers", level=2)
+        self._add_requirements_table(doc, "Required HTTP Headers", headers)
 
-        doc.add_heading("Required Exchange Properties", level=2)
-        self._add_requirements_table(doc, "Exchange Properties", analysis.get("properties", []))
+        doc.add_heading("4. Required Exchange Properties", level=2)
+        self._add_requirements_table(doc, "Exchange Properties", properties)
 
-        doc.add_heading("Schema-Derived Test Payloads", level=2)
+        doc.add_heading("5. Schema-Derived Test Payloads", level=2)
         self._add_payloads_section(doc, analysis.get("payloads", []))
 
         buf = io.BytesIO()
         doc.save(buf)
         return buf.getvalue()
+
+    def _populate_reference_table_rows(self, table, rows_data: List[Dict[str, Any]], col_keys: List[str]):
+        """Clears old dummy data rows in a reference document table and inserts real extracted iFlow data rows."""
+        if len(table.rows) <= 1 or not rows_data:
+            return
+
+        # Extract header background fill
+        bg_hex = self.NAVY_HEX
+        try:
+            hdr_cells = table.rows[0].cells
+            tcPr = hdr_cells[0]._tc.get_or_add_tcPr()
+            shd = tcPr.find(parse_xml(f'<w:shd {nsdecls("w")}/>').tag)
+            if shd is not None and shd.attrib.get(f'{{{nsdecls("w")}}}fill'):
+                bg_hex = shd.attrib.get(f'{{{nsdecls("w")}}}fill')
+        except Exception:
+            pass
+
+        # Clear existing data rows except header
+        num_rows = len(table.rows)
+        for _ in range(num_rows - 1):
+            tr = table.rows[1]._tr
+            table._tbl.remove(tr)
+
+        # Insert new iFlow data rows
+        for rdata in rows_data:
+            new_row = table.add_row()
+            for idx, key in enumerate(col_keys):
+                if idx < len(new_row.cells):
+                    val = str(rdata.get(key, ""))
+                    if key == "mandatory":
+                        val = "Yes" if rdata.get(key) else "No"
+                    new_row.cells[idx].text = val
 
     def _build_standard_tech_spec(
         self,
